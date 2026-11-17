@@ -22,6 +22,11 @@ const state = {
   overview: false,
   busy: false,
   notes: [], // pending notes for this thread
+  view: "thread", // "thread" (docs) or "river" (all projects)
+  projects: [],
+  projectId: null,
+  riverPads: {},
+  riverness: 0, // 0 = hills, 1 = meadow and water (zoomed out)
   cam: { x: 0, y: 0, s: 1, r: 0 },
   layout: { docW: 820, docH: 600, cx: 0, cy: 0, wide: true },
 };
@@ -83,7 +88,12 @@ function drawLinks() {
       path += ` C${mx},${py} ${mx},${y} ${x},${y}`;
     }
   });
-  linksEl.innerHTML = `<path class="trail" d="${path}" />`;
+  // When zoomed out, a river runs under the lily pads; it flows in and out of frame.
+  const sp = state.layout.docW * 1.6;
+  const [fx, fy] = pts[0] || [O, O], [lx, ly] = pts[pts.length - 1] || [O, O];
+  const river = `M${fx - sp},${fy + sp * 0.2} C${fx - sp / 2},${fy + sp * 0.2} ${fx - sp / 2},${fy} ${fx},${fy}` + path.replace(/^M[^ C]+/, "") + ` C${lx + sp / 2},${ly} ${lx + sp / 2},${ly - sp * 0.2} ${lx + sp},${ly - sp * 0.2}`;
+  const w = state.layout.docH * 0.55;
+  linksEl.innerHTML = `<path class="bank" d="${river}" stroke-width="${w * 1.35}" /><path class="water" d="${river}" stroke-width="${w}" /><path class="shimmer" d="${river}" /><path class="trail" d="${path}" />`;
 }
 
 // ---------------------------------------------------------------- camera
@@ -92,6 +102,9 @@ function applyCam() {
   const { cx, cy } = state.layout;
   const c = state.cam;
   world.style.transform = `translate(${cx}px,${cy}px) scale(${c.s}) rotate(${-c.r}deg) translate(${-c.x}px,${-c.y}px)`;
+  // Semantic zoom: far away, docs turn into lily pads that show only a title.
+  document.body.classList.toggle("far", c.s < 0.5);
+  world.style.setProperty("--inv", (1 / c.s).toFixed(3));
 }
 
 const ease = (t) => t * t * t * (t * (6 * t - 15) + 10); // smootherstep: unhurried
@@ -144,7 +157,7 @@ function camForOverview() {
     minY = Math.min(minY, d.pos.y - docH * 0.6); maxY = Math.max(maxY, d.pos.y + docH * 0.6);
   }
   const availW = (wide ? vw - 352 : vw) - 60, availH = vh - topH - composerH - 30;
-  const s = Math.min(availW / (maxX - minX), availH / (maxY - minY), 0.7);
+  const s = Math.min(availW / (maxX - minX), availH / (maxY - minY), 0.36);
   return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, s, r: 0 };
 }
 
@@ -159,6 +172,13 @@ async function focusDoc(i, opts = {}) {
   renderNotes();
   hidePopover();
   await flyTo(camForDoc(i), opts);
+}
+
+// O zooms out one level: doc → lily pads → the river of projects.
+function zoomOut() {
+  if (state.view === "river") return;
+  if (state.overview) return showRiver();
+  toggleOverview(true);
 }
 
 function toggleOverview(on = !state.overview) {
@@ -196,8 +216,10 @@ function makeDoc(d) {
   el.className = "doc";
   el.innerHTML = `
     <div class="doc-head"><span class="idx"></span><span class="time">${fmtTime(d.at)}</span><span class="spacer"></span><span class="prompt" title="">${headPrompt(d.user)}</span></div>
-    <div class="doc-scroll"><div class="doc-body"></div></div>`;
+    <div class="doc-scroll"><div class="doc-body"></div></div>
+    <div class="pad" aria-hidden="true"><span class="lily"></span><span class="pad-title"></span></div>`;
   d.el = el;
+  setPadTitle(d);
   d.bodyEl = $(".doc-body", el);
   d.scrollEl = $(".doc-scroll", el);
   if (d.user?.display?.text) $(".prompt", el).title = d.user.display.text;
@@ -207,6 +229,10 @@ function makeDoc(d) {
   });
   docsEl.appendChild(el);
   return d;
+}
+
+function setPadTitle(d) {
+  $(".pad-title", d.el).textContent = d.title && d.title !== "…" ? d.title : "Writing…";
 }
 
 function renumber() {
@@ -269,7 +295,7 @@ function addGutters(d) {
 }
 
 function thinkingMarkup() {
-  return `<div class="thinking"><div class="label">Thinking it through…</div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div></div>`;
+  return `<div class="thinking"><div class="label">Thinking it through…</div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="activity"></div></div>`;
 }
 
 // ---------------------------------------------------------------- notes & highlights
@@ -508,6 +534,11 @@ async function send() {
   const flown = focusDoc(state.docs.length - 1);
 
   let first = true, dirty = false;
+  const acts = [];
+  const showActs = () => {
+    const el = d.bodyEl.querySelector(".activity");
+    if (el) el.innerHTML = acts.slice(-4).map((a) => `<div>${esc(a)}</div>`).join("");
+  };
   const flush = () => {
     if (!dirty) return;
     dirty = false;
@@ -537,6 +568,14 @@ async function send() {
         const ev = /^event: (.+)$/m.exec(raw)?.[1];
         const data = JSON.parse(/^data: (.+)$/m.exec(raw)?.[1] || "{}");
         if (ev === "user") d.user = data;
+        else if (ev === "activity") { acts.push(data.text); showActs(); }
+        else if (ev === "reset") {
+          // The text so far was a preamble before Claude looked something up.
+          d.text = "";
+          first = true;
+          d.bodyEl.innerHTML = thinkingMarkup();
+          showActs();
+        }
         else if (ev === "delta" && data.text) {
           if (first) { first = false; await flown; d.bodyEl.innerHTML = ""; }
           d.text += data.text;
@@ -545,8 +584,9 @@ async function send() {
           // usage is available here if we want a cost readout later
         } else if (ev === "done") {
           Object.assign(d, { id: data.doc.id, title: data.doc.title, at: data.doc.at });
+          setPadTitle(d);
           state.thread.title = data.threadTitle;
-          $("#thread-title").textContent = data.threadTitle;
+          updateCrumb();
         } else if (ev === "error") failed = data;
       }
     }
@@ -588,8 +628,8 @@ const WELCOME = `# Welcome to Shell
 ## Moving around
 
 - **← →** fly between docs in this thread.
-- **O** zooms out to see the whole thread at once. Click any doc to fly in.
-- **T** opens your other threads. **N** starts a new one.
+- **O** zooms out. Docs turn into lily pads. Press **O** again to see all your projects on the river.
+- **T** opens this project's threads. **N** starts a new one.
 
 ## Try it now
 
@@ -604,8 +644,9 @@ async function api(path, opts) {
 async function openThread(id, { intro = true } = {}) {
   const t = await api(`/api/threads/${id}`);
   state.thread = t;
+  state.projectId = t.projectId;
   try { localStorage.setItem("shell.lastThread", id); } catch {}
-  $("#thread-title").textContent = t.title;
+  updateCrumb();
   docsEl.innerHTML = "";
   state.docs = [];
   let lastUser = null;
@@ -635,13 +676,23 @@ async function openThread(id, { intro = true } = {}) {
   if (innerWidth <= 760) input.placeholder = "Ask anything";
 }
 
-async function newThread() {
-  const t = await api("/api/threads", { method: "POST" });
+async function newThread(projectId = state.projectId) {
+  const t = await api("/api/threads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId }) });
   await openThread(t.id);
 }
 
+const projectName = (id) => state.projects.find((p) => p.id === id)?.name || "";
+
+function updateCrumb() {
+  $("#crumb-project").textContent = projectName(state.projectId);
+  $("#thread-title").textContent = state.thread?.title || "";
+}
+
 async function refreshThreadList() {
-  const list = await api("/api/threads");
+  const all = await api("/api/threads");
+  const list = all.filter((t) => !state.projectId || t.projectId === state.projectId);
+  $("#drawer .label").textContent = projectName(state.projectId) || "Threads";
+  $("#drawer-new").textContent = `+ New thread${state.projectId ? " in " + projectName(state.projectId) : ""}`;
   const el = $("#thread-list");
   el.innerHTML = "";
   for (const t of list) {
@@ -652,7 +703,7 @@ async function refreshThreadList() {
     b.addEventListener("click", () => openThread(t.id));
     el.appendChild(b);
   }
-  return list;
+  return all;
 }
 
 function openDrawer() {
@@ -762,9 +813,18 @@ function landscape() {
   resize();
   addEventListener("resize", resize);
 
-  let scene = sceneAt(hourNow()), sceneT = 0;
+  let scene = sceneAt(hourNow()), sceneT = -Infinity;
   const frame = (now) => {
-    if (now - sceneT > 30000) { scene = sceneAt(hourNow()); sceneT = now; document.body.classList.toggle("night", scene.glow > 0.5); }
+    if (now - sceneT > 30000) {
+      scene = sceneAt(hourNow()); sceneT = now;
+      document.body.classList.toggle("night", scene.glow > 0.5);
+      const rs = document.documentElement.style;
+      rs.setProperty("--water-a", rgb(mix(scene.top, [96, 160, 168], 0.55)));
+      rs.setProperty("--water-b", rgb(mix(scene.bot, [70, 128, 140], 0.6)));
+      rs.setProperty("--bank", rgb(mix(scene.near, [60, 90, 55], 0.4)));
+    }
+    const want = state.view === "river" || document.body.classList.contains("far") ? 1 : 0;
+    state.riverness += (want - state.riverness) * 0.05;
     const c = state.cam;
     const rise = Math.max(-1.6, Math.min(0.4, Math.log(c.s))); // zooming out = floating up
     // sky
@@ -821,6 +881,20 @@ function landscape() {
         ctx.fillRect(0, baseY - H * 0.12, W, H * 0.4);
       }
     }
+    // zoomed out: the hills give way to a meadow seen from above
+    if (state.riverness > 0.01) {
+      const meadow = mix(scene.near, [126, 156, 98], scene.glow > 0.5 ? 0.25 : 0.6);
+      const mg = ctx.createRadialGradient(W * 0.5, H * 0.45, 0, W * 0.5, H * 0.5, Math.max(W, H) * 0.75);
+      mg.addColorStop(0, rgb(mix(meadow, [255, 250, 220], 0.12), state.riverness));
+      mg.addColorStop(1, rgb(mix(meadow, [20, 40, 20], 0.25), state.riverness));
+      ctx.fillStyle = mg; ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 0.18 * state.riverness;
+      for (let i = 0; i < 14; i++) {
+        const bx = (((i * 0.6180339) % 1) * W - c.x * 0.02 * dpr) % W, by = (((i * 0.4142135) % 1) * H);
+        ctx.drawImage(sprite, bx - W * 0.15, by - W * 0.08, W * 0.3, W * 0.16);
+      }
+      ctx.globalAlpha = 1;
+    }
     // motes: pollen by day, fireflies by night
     for (const m of motes) {
       m.y -= m.sp * 0.00012; if (m.y < -0.05) m.y = 1.05;
@@ -835,6 +909,146 @@ function landscape() {
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
+}
+
+// ---------------------------------------------------------------- the river (all projects)
+// Zoomed all the way out, each project is a lily pad on a river. Client work
+// floats in its own pond, kept apart from personal projects.
+
+const riverWorld = $("#river-world");
+
+async function loadProjects() {
+  state.projects = await api("/api/projects");
+  return state.projects;
+}
+
+function riverGeometry() {
+  const portrait = innerHeight > innerWidth * 1.15;
+  // Design in a 1600×1000 landscape; on tall screens, turn it on its side.
+  const T = portrait ? ([x, y]) => [y * 0.95, x] : ([x, y]) => [x, y];
+  const W = portrait ? 950 : 1600, H = portrait ? 1600 : 1000;
+  const at = (t) => [-150 + 1900 * t, 360 + 120 * Math.sin(t * Math.PI * 2 + 0.5)];
+  const river = Array.from({ length: 61 }, (_, i) => T(at(i / 60)));
+  const pond = { c: T([1220, 800]), rx: portrait ? 170 : 330, ry: portrait ? 330 : 150 };
+  return { portrait, T, W, H, at, river, pond };
+}
+
+function renderRiver() {
+  const g = riverGeometry();
+  const personal = state.projects.filter((p) => p.group !== "client");
+  const clients = state.projects.filter((p) => p.group === "client");
+  const pathD = g.river.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const [pcx, pcy] = g.pond.c;
+  $("#river-svg").setAttribute("viewBox", `0 0 ${g.W} ${g.H}`);
+  $("#river-svg").setAttribute("width", g.W);
+  $("#river-svg").setAttribute("height", g.H);
+  $("#river-svg").innerHTML = `
+    <path class="bank" d="${pathD}" />
+    <path class="water" d="${pathD}" />
+    <path class="shimmer" d="${pathD}" />
+    <path class="shimmer two" d="${pathD}" />
+    <ellipse class="bank" cx="${pcx}" cy="${pcy}" rx="${g.pond.rx + 30}" ry="${g.pond.ry + 30}" />
+    <ellipse class="water" cx="${pcx}" cy="${pcy}" rx="${g.pond.rx}" ry="${g.pond.ry}" />
+    <ellipse class="shimmer" cx="${pcx}" cy="${pcy}" rx="${g.pond.rx * 0.8}" ry="${g.pond.ry * 0.7}" />`;
+
+  const pads = $("#pads");
+  pads.innerHTML = "";
+  state.riverPads = {};
+  const place = (p, x, y, ghost = false) => {
+    const recent = p.threads?.[0] && Date.now() - p.threads[0].updated < 36e5 * 24;
+    const size = ghost ? 150 : 160 + 14 * Math.min(p.threads?.length || 0, 6);
+    const b = document.createElement(ghost ? "div" : "button");
+    b.className = "lilypad" + (recent ? " bloom" : "") + (ghost ? " ghost" : "") + (p.id === state.projectId ? " here" : "");
+    b.style.cssText = `left:${x - size / 2}px;top:${y - size / 2}px;width:${size}px;height:${size}px;--d:${(x % 7).toFixed(1)}s`;
+    b.innerHTML = `<span class="lily"></span><span class="pad-name"></span><span class="pad-meta"></span>`;
+    $(".pad-name", b).textContent = p.name;
+    if (!ghost) {
+      const n = p.threads?.length || 0;
+      $(".pad-meta", b).textContent = n ? `${n} thread${n === 1 ? "" : "s"}` : "start here";
+      b.addEventListener("click", () => enterProject(p.id));
+      state.riverPads[p.id] = { x, y };
+    } else $(".pad-meta", b).textContent = "add one in projects.json";
+    pads.appendChild(b);
+  };
+  personal.forEach((p, i) => {
+    const t = (i + 0.7) / (personal.length + 0.4);
+    const [x, y] = g.T(g.at(Math.min(0.92, t * 0.85 + 0.04)));
+    place(p, x, y + (g.portrait ? 0 : i % 2 ? 26 : -26));
+  });
+  if (clients.length) {
+    clients.forEach((p, i) => {
+      const k = (i + 1) / (clients.length + 1) - 0.5;
+      const [x, y] = g.portrait ? [pcx, pcy + k * g.pond.ry * 1.6] : [pcx + k * g.pond.rx * 1.6, pcy];
+      place(p, x, y);
+    });
+  } else place({ name: "Client work" }, pcx, pcy, true);
+
+  const labels = g.portrait
+    ? [["Your projects", 250, -70], ["Clients", pcx - g.pond.rx + 20, pcy - g.pond.ry - 80]]
+    : [["Your projects", 90, 120], ["Clients", pcx - 60, pcy - g.pond.ry - 80]];
+  for (const [txt, x, y] of labels) {
+    const l = document.createElement("div");
+    l.className = "river-label";
+    l.style.cssText = `left:${x}px;top:${y}px`;
+    l.textContent = txt;
+    pads.appendChild(l);
+  }
+  riverWorld.style.width = g.W + "px";
+  riverWorld.style.height = g.H + "px";
+  return g;
+}
+
+function riverFit(g) {
+  const topH = state.layout.topH;
+  const s = Math.min(innerWidth / g.W, (innerHeight - topH) / g.H) * 0.94;
+  return { x: g.W / 2, y: g.H / 2, s, oy: topH / 2 };
+}
+
+function setRiverCam(c, animate) {
+  riverWorld.style.transition = animate && !reduceMotion ? "transform 1.6s var(--ease), opacity 1.2s var(--ease)" : "none";
+  riverWorld.style.transform = `translate(${innerWidth / 2}px, ${innerHeight / 2 + (c.oy || 0)}px) scale(${c.s}) translate(${-c.x}px, ${-c.y}px)`;
+}
+
+async function showRiver({ instant = false } = {}) {
+  if (state.view === "river" && !instant) return;
+  hidePopover();
+  closeDrawer();
+  await loadProjects().catch(() => {});
+  const g = renderRiver();
+  const fit = riverFit(g);
+  const pad = state.riverPads[state.projectId];
+  // Labels stay one readable size whatever the zoom.
+  riverWorld.style.setProperty("--rs", fit.s.toFixed(3));
+  state.view = "river";
+  document.body.classList.add("river");
+  if (instant) {
+    setRiverCam(fit, false);
+    state.riverness = 1;
+    return;
+  }
+  // The docs sink away while the river rises up from this project's pad.
+  if (state.docs.length) {
+    const o = camForOverview();
+    flyTo({ ...o, s: o.s * 0.2, r: 0 }, { dip: false, duration: 1200 });
+  }
+  setRiverCam(pad ? { ...fit, x: pad.x, y: pad.y, s: fit.s * 3 } : { ...fit, s: fit.s * 1.6 }, false);
+  riverWorld.offsetWidth; // commit the start position before animating
+  setRiverCam(fit, true);
+}
+
+async function enterProject(pid, threadId) {
+  const g = riverGeometry();
+  const fit = riverFit(g);
+  const pad = state.riverPads[pid];
+  if (pad) setRiverCam({ ...fit, x: pad.x, y: pad.y, s: fit.s * 3.2 }, true);
+  await new Promise((r) => setTimeout(r, reduceMotion ? 0 : 650));
+  state.view = "thread";
+  document.body.classList.remove("river");
+  state.projectId = pid;
+  const proj = state.projects.find((p) => p.id === pid);
+  const target = threadId && (!proj || proj.threads.some((t) => t.id === threadId)) ? threadId : proj?.threads?.[0]?.id;
+  if (target) await openThread(target);
+  else await newThread(pid);
 }
 
 // ---------------------------------------------------------------- overview pan / zoom
@@ -910,9 +1124,11 @@ $("#btn-send").addEventListener("click", send);
 $("#btn-threads").addEventListener("click", openDrawer);
 $("#drawer-close").addEventListener("click", closeDrawer);
 $("#drawer-scrim").addEventListener("click", closeDrawer);
-$("#drawer-new").addEventListener("click", newThread);
-$("#btn-new").addEventListener("click", newThread);
-$("#btn-overview").addEventListener("click", () => toggleOverview());
+$("#drawer-new").addEventListener("click", () => newThread());
+$("#btn-new").addEventListener("click", () => (state.view === "river" ? null : newThread()));
+$("#brand").addEventListener("click", () => (state.view === "river" ? enterProject(state.projectId, state.thread?.id) : showRiver()));
+$("#drawer-river").addEventListener("click", () => { closeDrawer(); showRiver(); });
+$("#btn-overview").addEventListener("click", zoomOut);
 $("#nav-prev").addEventListener("click", () => focusDoc(state.focus - 1));
 $("#nav-next").addEventListener("click", () => focusDoc(state.focus + 1));
 $("#attach-chip").addEventListener("click", () => $("#notes-panel").classList.toggle("open"));
@@ -937,12 +1153,17 @@ addEventListener("keydown", (e) => {
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (state.view === "river") {
+    if (e.key === "Escape" || e.key === "o" || e.key === "O") enterProject(state.projectId, state.thread?.id);
+    return;
+  }
   if (e.key === "ArrowRight") { e.preventDefault(); focusDoc(Math.min(state.docs.length - 1, state.focus + 1)); }
   else if (e.key === "ArrowLeft") { e.preventDefault(); focusDoc(Math.max(0, state.focus - 1)); }
-  else if (e.key === "o" || e.key === "O") toggleOverview();
+  else if (e.key === "o" || e.key === "O") zoomOut();
   else if (e.key === "Escape") { if (state.overview) toggleOverview(false); closeDrawer(); }
   else if (e.key === "t" || e.key === "T") openDrawer();
   else if (e.key === "n" || e.key === "N") newThread();
+  else if (e.key === "p" || e.key === "P") showRiver();
   else if (e.key === "/") { e.preventDefault(); input.focus(); }
 });
 
@@ -968,15 +1189,19 @@ async function boot() {
     const s = await api("/api/status");
     const st = $("#status");
     st.classList.toggle("live", s.live);
-    $(".status-text", st).textContent = s.live ? "Here" : "Demo";
-    st.title = s.live ? `Model ${s.model}, effort ${s.effort}. Context files: ${s.contextFiles.join(", ") || "none"}` : "No API key — replies are canned. See README.";
+    $(".status-text", st).textContent = { plan: "Your plan", api: "API", demo: "Demo" }[s.engine] || "Demo";
+    st.title = s.engine === "plan" ? `Running on your Claude plan via Claude Code. Tools: ${s.tools.join(", ")}` : s.engine === "api" ? `Claude API · ${s.model}` : "Demo mode: replies are canned. See README.";
   } catch {}
-  const list = await refreshThreadList();
+  await loadProjects();
+  const list = await api("/api/threads");
   let last = null;
   try { last = localStorage.getItem("shell.lastThread"); } catch {}
   const pick = list.find((t) => t.id === last) || list[0];
-  if (pick) await openThread(pick.id);
-  else await newThread();
+  // Open on the river for a moment, then glide into where you left off.
+  state.projectId = pick?.projectId || state.projects[0]?.id;
+  await showRiver({ instant: true });
+  await new Promise((r) => setTimeout(r, reduceMotion ? 0 : 1100));
+  await enterProject(state.projectId, pick?.id);
 }
 
 boot();

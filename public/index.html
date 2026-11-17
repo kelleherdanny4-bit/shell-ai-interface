@@ -21,14 +21,22 @@
     </div>
   </div>
 
+  <!-- The river: every project as a lily pad -->
+  <div id="river" aria-label="All projects">
+    <div id="river-world">
+      <svg id="river-svg" aria-hidden="true"></svg>
+      <div id="pads"></div>
+    </div>
+  </div>
+
   <!-- HUD: top bar -->
   <header id="hud-top">
     <div class="pill">
       <button class="hud-btn" id="btn-threads" title="Threads (T)" aria-label="Threads">
         <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
       </button>
-      <div class="brand"><span class="brand-ring"></span>Shell</div>
-      <div class="thread-title" id="thread-title">—</div>
+      <button class="brand" id="brand" title="All projects (P)"><span class="brand-ring"></span>Shell</button>
+      <div class="crumbs"><span class="crumb-project" id="crumb-project"></span><span class="thread-title" id="thread-title"></span></div>
     </div>
     <nav id="constellation" aria-label="Documents in this thread"></nav>
     <div class="hud-right">
@@ -91,7 +99,7 @@
       </button>
       <button id="btn-send" title="Send (Enter)">Send</button>
     </div>
-    <div class="composer-meta" id="composer-meta">Enter to send · ← → drift between docs · O to see them all</div>
+    <div class="composer-meta" id="composer-meta">Enter to send · ← → drift between docs · O to zoom out · P for all projects</div>
   </footer>
 
   <!-- Threads drawer -->
@@ -99,6 +107,7 @@
   <aside id="drawer" aria-label="Threads">
     <div class="panel-head"><span class="label">Threads</span><button class="panel-close" id="drawer-close" aria-label="Close">×</button></div>
     <button id="drawer-new" class="drawer-new">+ New thread</button>
+    <button id="drawer-river" class="drawer-river">See all projects on the river</button>
     <div id="thread-list"></div>
   </aside>
 

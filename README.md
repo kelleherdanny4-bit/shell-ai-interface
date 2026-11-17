@@ -9,21 +9,47 @@ together. No copy-paste.
 
 The camera flies between docs, Prezi-style. Zoom out to see the whole thread.
 
-## Run it
+## Run it (on your Claude plan, no API key)
+
+One-time setup on your computer:
+
+1. Install Claude Code and sign in once: run `claude` in a terminal and log in
+   with your Claude account.
+2. Clone Shell **next to your other repos** (same parent folder as
+   `steering-add`, `ai-career`, `the-clear-voice`).
+3. In the `shell-ai-interface` folder:
 
 ```bash
 npm install
 ```
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... npm start
+npm start
 ```
 
-Open http://localhost:4747.
+Open http://localhost:4747. The light in the top right says **Your plan**.
 
-No key yet? `npm run demo` runs everything with a canned reply so you can try
-the interface. The API key comes from console.anthropic.com and is billed
-separately from a Claude.ai plan.
+Shell runs Claude Code in the background for each message. Claude reads your
+repos, including each repo's `CLAUDE.md` / `AGENTS.md`, so every chat already
+knows your rules and plans. It's **read-only** for now: it can read and search
+files and the web, not edit them.
+
+Other ways to run: `ANTHROPIC_API_KEY=sk-ant-... SHELL_ENGINE=api npm start`
+(API key, billed separately), or `npm run demo` (canned replies).
+
+## Projects: the river
+
+Your projects live in `projects.json` (made from `projects.example.json` on
+first run; it stays on your computer). Each one is a lily pad on the river.
+
+```json
+{ "id": "website", "name": "Website", "group": "personal", "repo": "the-clear-voice", "also": ["ai-career"] }
+```
+
+- `repo`: the folder Claude works in. `also`: extra folders it can read.
+- `shared` (top level): folders every **personal** project can read.
+- `"group": "client"` puts a project in the **Clients** pond. Client projects
+  never get your personal folders, so client work stays sealed off.
 
 ## Use it
 
@@ -35,8 +61,9 @@ separately from a Claude.ai plan.
 | Edit a note | Click its text in the Notes panel |
 | Send notes | **Send**. Typed text goes along as "Also: …" |
 | Move between docs | **← →** or the dots in the top bar |
-| See everything | **O** (or pinch out). Drag to pan, scroll to zoom, click a doc to fly in |
-| Threads | **T** to list, **N** for a new one |
+| Zoom out | **O**: docs become lily pads with just their titles. **O** again: the river of all projects |
+| All projects | **P**, or click **Shell** in the top left. Click a pad to dive in |
+| Threads | **T** lists this project's threads, **N** starts a new one |
 
 Unsent notes are saved in the browser, so a reload never loses them.
 
@@ -44,19 +71,19 @@ Unsent notes are saved in the browser, so a reload never loses them.
 
 | Env var | Default | What |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | — | Your key |
-| `SHELL_MODEL` | `claude-opus-5-5` | Model |
-| `SHELL_EFFORT` | `medium` | `low` … `max`. Higher = deeper, slower |
+| `SHELL_ENGINE` | auto | `plan` (Claude Code), `api`, or `demo`. Auto picks plan if `claude` is installed |
+| `SHELL_TOOLS` | `Read,Grep,Glob,WebSearch,WebFetch` | Tools Claude may use in plan mode. Add `Edit,Write` to let it change files |
+| `SHELL_PLAN_MODEL` | your plan's default | Model for plan mode |
+| `ANTHROPIC_API_KEY` | — | Only for `api` mode |
+| `SHELL_MODEL` / `SHELL_EFFORT` | `claude-opus-5-5` / `medium` | `api` mode only |
 | `PORT` | `4747` | |
-| `DEMO` | — | `1` = canned replies |
 
-Refusal fallback is on: if a safety check declines a request, the API retries
-it on a suitable model instead of failing.
+Add `?hour=21` to the address to preview the landscape at night.
 
 ## How it's built
 
-- `server.js`: tiny Node server. Stores threads in `data/threads/*.json`,
-  streams replies over Server-Sent Events.
+- `server.js`: tiny Node server. Runs Claude Code (or the API) per message,
+  stores threads in `data/threads/*.json`, streams replies over Server-Sent Events.
 - `prompts/system.md`: tells Claude every reply is a document, how notes
   arrive, and how Danny likes to read.
 - `context/*.md`: standing knowledge added to every chat. Seed of the
@@ -66,8 +93,7 @@ it on a suitable model instead of failing.
 
 ## Next ideas
 
-- Pull `context/` from the GitHub repos automatically.
-- Claude Code powers (files, repos, tools) via the Claude Agent SDK.
+- Turn on edits per project, with a confirm step in the doc.
 - Show sent notes faded on the old doc, linked to the answer.
 - Read replies aloud. Voice-only mode.
 - Side-by-side diff when Claude sends a v2 of a doc.
