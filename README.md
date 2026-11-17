@@ -7,7 +7,10 @@ would to a doc someone handed you: select words, leave a note or a quick
 reaction (Yes / No / Why? / More). Then hit Send, and all your notes go back
 together. No copy-paste.
 
-The camera flies between docs, Prezi-style. Zoom out to see the whole thread.
+The camera flies between docs, Prezi-style. Zoom out and a pale blue sky is
+printed over the paper in halftone dots: each doc becomes a small cloud, and
+further up every project is a cloud of its own. Dive into a cloud and it opens
+out into the page. One world, one continuous zoom.
 
 ## Run it (on your Claude plan, no API key)
 
@@ -37,10 +40,10 @@ files and the web, not edit them.
 Other ways to run: `ANTHROPIC_API_KEY=sk-ant-... SHELL_ENGINE=api npm start`
 (API key, billed separately), or `npm run demo` (canned replies).
 
-## Projects: the river
+## Projects: the sky
 
 Your projects live in `projects.json` (made from `projects.example.json` on
-first run; it stays on your computer). Each one is a lily pad on the river.
+first run; it stays on your computer). Each one is a cloud in the sky.
 
 ```json
 { "id": "website", "name": "Website", "group": "personal", "repo": "the-clear-voice", "also": ["ai-career"] }
@@ -48,22 +51,25 @@ first run; it stays on your computer). Each one is a lily pad on the river.
 
 - `repo`: the folder Claude works in. `also`: extra folders it can read.
 - `shared` (top level): folders every **personal** project can read.
-- `"group": "client"` puts a project in the **Clients** pond. Client projects
+- `"group": "client"` puts a project in the **Clients** cloud bank, lower down with clear sky between. Client projects
   never get your personal folders, so client work stays sealed off.
 
 ## Use it
 
 | Do this | How |
 | --- | --- |
-| Ask | Type in the bottom bar (or tap the mic). Enter sends. |
+| Ask | Just start typing (or tap the mic). Enter sends. |
 | React to a line | Select text → **Note**, or **Y / X / W / M** for Yes / No / Why? / More |
 | React to a paragraph | Hover it, tap the **+** in the left margin |
 | Edit a note | Click its pencil text in the margin beside the doc. Hover it and tap **×** to erase |
 | Send notes | **Send**. Typed text goes along as "Also: …" |
 | Move between docs | **← →** or the dots in the top bar |
-| Zoom out | **O**: docs become lily pads with just their titles. **O** again: the river of all projects |
-| All projects | **P**, or click **Shell** in the top left. Click a pad to dive in |
-| Threads | **T** lists this project's threads, **N** starts a new one |
+| Zoom out | **o**: docs become clouds with just their titles. **o** again: the sky of all projects. Or scroll / pinch, all the way up and back down |
+| All projects | **p**, or click **Shell** in the top left. Click a cloud to dive in; **Enter** dives back into where you were |
+| Threads | **t** lists this project's threads, **n** starts a new one |
+
+Shortcuts are lowercase. A capital letter (the start of a sentence) always goes
+to the composer, so typing "Now…" never opens a new thread.
 
 Unsent notes are saved in the browser, so a reload never loses them.
 
@@ -78,7 +84,8 @@ Unsent notes are saved in the browser, so a reload never loses them.
 | `SHELL_MODEL` / `SHELL_EFFORT` | `claude-opus-5-5` / `medium` | `api` mode only |
 | `PORT` | `4747` | |
 
-Add `?hour=21` to the address to preview the light at night. Shadows follow the real time of day.
+Add `?hour=21` to the address to preview the light at night. Shadows, the sun,
+the moon and how deep the sky is printed all follow the real time of day.
 
 ## How it's built
 
@@ -89,7 +96,9 @@ Add `?hour=21` to the address to preview the light at night. Shadows follow the 
 - `context/*.md`: standing knowledge added to every chat. Seed of the
   "repo knowledge in every new chat" project.
 - `public/`: the app. No build step. `app.js` holds the camera, docs, notes,
-  and composer.
+  composer, and the sky: a two-pass WebGL 2 shader that prints the halftone
+  (one texel per halftone cell, then the dots on the washi). Without WebGL 2
+  you get the bare paper and no sky.
 
 ## Next ideas
 

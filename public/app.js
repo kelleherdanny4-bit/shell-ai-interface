@@ -618,6 +618,7 @@ async function send() {
   const sentNotes = state.notes;
   input.value = "";
   autoGrow();
+  input.blur(); // the reply is a doc to read; letter keys go back to moving around
   state.notes = [];
   saveNotes();
   setBusy(true);
@@ -1007,10 +1008,10 @@ function skyLayout() {
   const personal = state.projects.filter((p) => p.group !== "client");
   const clients = state.projects.filter((p) => p.group === "client");
   const pos = {}, size = {};
-  const sz = (p) => { const w = (portrait ? 520 : 380) + 20 * Math.min(p.threads?.length || 0, 6); return [w, w * 0.5]; };
+  const sz = (p) => { const w = (portrait ? 520 : 380) + 20 * Math.min(p.threads?.length || 0, 6); return [w, w * (portrait ? 0.4 : 0.5)]; };
   const n = personal.length;
   personal.forEach((p, i) => {
-    if (portrait) pos[p.id] = [FW / 2 + Math.sin(i * 2.4 + 0.5) * FW * 0.12, 220 + (i + 0.5) * (900 / Math.max(1, n))];
+    if (portrait) pos[p.id] = [FW / 2 + (i % 2 ? 1 : -1) * FW * 0.1, 190 + (i + 0.5) * (980 / Math.max(1, n))];
     else if (n <= 4) pos[p.id] = [FW * (0.17 + 0.66 * (n === 1 ? 0.5 : i / (n - 1))), 340 + Math.sin(i * 2.2 + 0.9) * 95];
     else {
       const cols = Math.ceil(n / 2), row = i % 2, col = Math.floor(i / 2);
@@ -1018,7 +1019,7 @@ function skyLayout() {
     }
     size[p.id] = sz(p);
   });
-  const bankY = portrait ? 1290 : 820;
+  const bankY = portrait ? 1310 : 820;
   const bank = clients.length ? clients : [{ id: "__ghost", name: "Client work", ghost: true, threads: [] }];
   bank.forEach((p, i) => {
     const m = bank.length, k = m === 1 ? 0.5 : i / (m - 1);
@@ -1227,10 +1228,11 @@ function ground() {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-  const PITCH = 6, ANG = (15 * Math.PI) / 180, ROTV = [Math.cos(ANG), Math.sin(ANG)];
+  let PITCH = 6; const ANG = (15 * Math.PI) / 180, ROTV = [Math.cos(ANG), Math.sin(ANG)];
   let W, H, dpr, cell0, cw = 0, ch = 0;
   const resize = () => {
     dpr = Math.min(2, devicePixelRatio || 1);
+    PITCH = innerWidth <= 760 ? 5 : 6;
     W = cv.width = Math.round(innerWidth * dpr);
     H = cv.height = Math.round(innerHeight * dpr);
     // the halftone grid is turned 15°: find the cells that cover the screen
@@ -1570,18 +1572,19 @@ addEventListener("keydown", (e) => {
     if (["Escape", "Enter", "o", "O"].includes(e.key)) enterProject(state.projectId, state.thread?.id);
     return;
   }
-  // Type anywhere to start writing; the single letters below stay shortcuts.
-  if (e.key.length === 1 && !/^[otnpOTNP/]$/.test(e.key) && !state.busy && !state.overview) {
+  // Type anywhere to start writing. Lowercase o, p, t, n stay shortcuts; a
+  // capital (the start of a sentence) always goes to the composer.
+  if (e.key.length === 1 && !/^[otnp/]$/.test(e.key) && !state.overview) {
     input.focus({ preventScroll: true });
     return;
   }
   if (e.key === "ArrowRight") { e.preventDefault(); focusDoc(Math.min(state.docs.length - 1, state.focus + 1)); }
   else if (e.key === "ArrowLeft") { e.preventDefault(); focusDoc(Math.max(0, state.focus - 1)); }
-  else if (e.key === "o" || e.key === "O") zoomOut();
+  else if (e.key === "o") zoomOut();
   else if (e.key === "Escape") { if (state.overview) toggleOverview(false); closeDrawer(); }
-  else if (e.key === "t" || e.key === "T") openDrawer();
-  else if (e.key === "n" || e.key === "N") newThread();
-  else if (e.key === "p" || e.key === "P") showSky();
+  else if (e.key === "t") openDrawer();
+  else if (e.key === "n") newThread();
+  else if (e.key === "p") showSky();
   else if (e.key === "/") { e.preventDefault(); input.focus(); }
 });
 
