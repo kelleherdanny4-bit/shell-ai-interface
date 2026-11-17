@@ -97,3 +97,9 @@ Add `?hour=21` to the address to preview the light at night. Shadows follow the 
 - Show sent notes faded on the old doc, linked to the answer.
 - Read replies aloud. Voice-only mode.
 - Side-by-side diff when Claude sends a v2 of a doc.
+- Remote access: use Shell from another computer or phone while it runs at
+  home. Shell can't move to a web host (it needs your Claude sign-in and your
+  repos), so the home computer stays on and a Cloudflare Tunnel gives it a
+  public URL. Needs a password login in Shell first: today anyone with the
+  link could use your plan and read your repos. Tailscale is the private
+  alternative.
