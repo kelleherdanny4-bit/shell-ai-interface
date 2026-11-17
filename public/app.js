@@ -1131,32 +1131,56 @@ float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32);
 float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y); }
 float puff(vec4 c, vec2 p) { vec2 d = (p - c.xy) / c.z; d.y *= 1.3; float q = dot(d, d); float k = max(0., 1. - q); return k * k * c.w; }
-float fA(vec2 p) { float f = 0., m = 0.; for (int i = 0; i < MAXP; i++) { if (i >= uNA) break; float k = puff(uA[i], p); f += k; m = max(m, k); } return m + .28 * (f - m); }
-float fB(vec2 p) { float f = 0., m = 0.; for (int i = 0; i < MAXP; i++) { if (i >= uNB) break; float k = puff(uB[i], p); f += k; m = max(m, k); } return m + .28 * (f - m); }
-float cov(float f, vec2 p) {
-  float n = vn(p * .011 + vec2(uT * .013, uT * .004)) + .5 * vn(p * .033 - vec2(uT * .021, 0.));
-  return smoothstep(.07, .55, f + (n - .75) * .3);
+// billows meet in a soft crease, not a seam
+float smax(float a, float b) { float h = max(.3 - abs(a - b), 0.) / .3; return max(a, b) + h * h * .075 * smoothstep(0., .15, min(a, b)); }
+float fA(vec2 p) { float f = 0., m = 0.; for (int i = 0; i < MAXP; i++) { if (i >= uNA) break; float k = puff(uA[i], p); f += k; m = smax(m, k); } return m + .22 * max(0., f - m); }
+float fB(vec2 p) { float f = 0., m = 0.; for (int i = 0; i < MAXP; i++) { if (i >= uNB) break; float k = puff(uB[i], p); f += k; m = smax(m, k); } return m + .22 * max(0., f - m); }
+float F(int w, vec2 p) { return w == 0 ? fA(p) : fB(p); }
+// a smooth version of the same heap, for lighting: no creases to catch the light
+float sA(vec2 p) { float f = 0.; for (int i = 0; i < MAXP; i++) { if (i >= uNA) break; f += puff(uA[i], p); } return f; }
+float sB(vec2 p) { float f = 0.; for (int i = 0; i < MAXP; i++) { if (i >= uNB) break; f += puff(uB[i], p); } return f; }
+float S(int w, vec2 p) { return w == 0 ? sA(p) : sB(p); }
+float wob(vec2 p) { return vn(p * .011 + vec2(uT * .013, uT * .004)) + .5 * vn(p * .033 - vec2(uT * .021, 0.)) - .75; }
+float cov(float f, vec2 p) { return smoothstep(.07, .55, f + wob(p) * .3); }
+// One level of clouds: how cloudy this cell is, how much of the cloud here
+// turns away from the light, and whether a cloud's shadow falls on it.
+void level(int w, vec2 p, float off, out float c, out float und, out float shd) {
+  float f = F(w, p);
+  c = cov(f, p);
+  // the field is a heap of domes: its slope gives each billow a surface to light
+  float h = max(2., off * .6), s0 = S(w, p);
+  float gx = (S(w, p + vec2(h, 0.)) - s0) / h, gy = (S(w, p + vec2(0., h)) - s0) / h;
+  vec3 n = normalize(vec3(-gx, -gy, 2.2 / max(off * 5., 1.)));
+  vec3 L = normalize(vec3(-uSh, .85));
+  float dif = dot(n, L);
+  und = c * smoothstep(.75, -.4, dif);
+  // the shadow it casts on the sky below, a soft blur of its own shape
+  vec2 s = p - uSh * off * 3.2;
+  shd = smoothstep(.0, .62, F(w, s) + wob(s) * .2);
 }
 void main() {
   if (uDens < .002) { o = vec4(0.); return; }
   vec2 q = (uCell0 + floor(gl_FragCoord.xy) + .5) * uPitch;
   vec2 p = vec2(uRot.x * q.x + uRot.y * q.y, -uRot.y * q.x + uRot.x * q.y);
-  float a = 0., b = 0., a2 = 0., b2 = 0.;
-  if (uW > .002) { a = cov(fA(p), p); vec2 s = p + uSh * uOffA; a2 = cov(fA(s), s); }
-  if (uW < .998) { b = cov(fB(p), p); vec2 s = p + uSh * uOffB; b2 = cov(fB(s), s); }
+  float a = 0., au = 0., ac = 0., b = 0., bu = 0., bc = 0.;
+  if (uW > .002) level(0, p, uOffA, a, au, ac);
+  if (uW < .998) level(1, p, uOffB, b, bu, bc);
   float c = mix(b, a, uW);
-  float sh = mix(b * (1. - b2), a * (1. - a2), uW);
-  float ink = uDens * (1. - c);
+  float und = mix(bu, au, uW);
+  float fade = min(1., uDens * 3.);
+  float shd = mix(bc, ac, uW) * (1. - c) * fade;
+  float ink = min(1., uDens * (1. - c) * (1. + .4 * shd));
   if (uMoon.w > 0.) ink *= 1. - uMoon.w * (1. - smoothstep(uMoon.z * .9, uMoon.z * 1.1, length(p - uMoon.xy)));
-  o = vec4(ink, sh, c, 1.);
+  o = vec4(ink, und * fade, c, shd);
 }`;
 
-// Pass 2: print. Washi, then the blue screen at 15°, the red sun, the grey
-// undersides, and the one light falling across it all.
+// Pass 2: print. Washi, the cloud bodies lit and shaded, the blue screen at
+// 15° (deeper where a cloud's shadow falls), the red sun, and the one light
+// falling across it all.
 const FS_PRINT = `#version 300 es
 precision highp float;
 uniform sampler2D uCells; uniform sampler2D uWashi;
-uniform vec2 uRes, uRot, uCell0; uniform float uDpr, uPitch, uDark;
+uniform vec2 uRes, uRot, uCell0, uCellN; uniform float uDpr, uPitch, uDark;
 uniform vec3 uPaper, uBlue, uGraph, uRed, uWM0, uWM1;
 uniform vec4 uLg, uSun;
 out vec4 o;
@@ -1169,19 +1193,28 @@ void main() {
   vec2 q = vec2(uRot.x * p.x - uRot.y * p.y, uRot.y * p.x + uRot.x * p.y);
   vec2 cell = floor(q / uPitch);
   vec4 c = texelFetch(uCells, ivec2(cell - uCell0), 0);
+  vec4 sm = texture(uCells, (q / uPitch - uCell0) / uCellN);   // the same, smoothed
+  // cloud bodies: a soft highlight toward the light, a cool shade turning away
+  vec3 shadeCol = mix(uPaper, uBlue, .5) * .8;
+  col = mix(col, vec3(1., .995, .98), sm.b * (1. - sm.g) * .2);
+  col = mix(col, shadeCol, sm.g * .4);
+  // a cloud's shadow on the sky: a cool wash between the dots
+  col = mix(col, uBlue * .8, sm.a * .16);
   float d = length(q - (cell + .5) * uPitch), aa = .7 / uDpr;
   float rb = uPitch * .6 * sqrt(c.r);
-  col = mix(col, uBlue, (1. - smoothstep(rb - aa, rb + aa, d)) * .94 * step(.004, c.r));
+  vec3 dotCol = mix(uBlue, uBlue * .7, smoothstep(0., 1., sm.a));
+  col = mix(col, dotCol, (1. - smoothstep(rb - aa, rb + aa, d)) * .94 * step(.004, c.r));
   if (uSun.w > 0.) {
     float disc = 1. - smoothstep(uSun.z - aa, uSun.z + aa, length(p - uSun.xy));
-    col = mix(col, uRed, disc * uSun.w * (1. - c.b));
+    col = mix(col, uRed, disc * uSun.w * (1. - sm.b));
   }
-  float rg = uPitch * .5 * sqrt(c.g * .16);
-  col = mix(col, uGraph, (1. - smoothstep(rg - aa, rg + aa, d)) * .42 * step(.02, c.g));
+  float rg = uPitch * .5 * sqrt(c.g * .22);
+  col = mix(col, uGraph, (1. - smoothstep(rg - aa, rg + aa, d)) * .38 * step(.03, c.g));
   float t = clamp(dot(p - uLg.xy, uLg.zw), 0., 1.);
   col = t < .5 ? mix(col, vec3(1., .988, .957), .2 * (1. - t * 2.)) : mix(col, vec3(.118, .094, .07), uDark * (t * 2. - 1.));
   o = vec4(col, 1.);
 }`;
+
 
 function ground() {
   const cv = $("#ground");
@@ -1204,7 +1237,13 @@ function ground() {
     return { p, u };
   };
   let P1, P2;
-  try { P1 = compile(FS_CELLS); P2 = compile(FS_PRINT); } catch (e) { console.warn("Sky shader failed, printing paper only:", e); return paperOnly(cv); }
+  try { P1 = compile(FS_CELLS); P2 = compile(FS_PRINT); } catch (e) {
+    console.warn("Sky shader failed, printing paper only:", e);
+    // this canvas is spoken for by WebGL now; paper needs a fresh one
+    const fresh = cv.cloneNode();
+    cv.replaceWith(fresh);
+    return paperOnly(fresh);
+  }
 
   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -1223,8 +1262,9 @@ function ground() {
   const cells = gl.createTexture(), fbo = gl.createFramebuffer();
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, cells);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  // texelFetch reads one cell for the dots; texture() blends cells for smooth shading
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
@@ -1343,6 +1383,7 @@ function ground() {
     gl.uniform2f(u2.uRes, W, H);
     gl.uniform2f(u2.uRot, ROTV[0], ROTV[1]);
     gl.uniform2f(u2.uCell0, cell0[0], cell0[1]);
+    gl.uniform2f(u2.uCellN, cw, ch);
     gl.uniform1f(u2.uDpr, dpr);
     gl.uniform1f(u2.uPitch, PITCH);
     gl.uniform1f(u2.uDark, 0.13 + scene.dens * 0.12);
