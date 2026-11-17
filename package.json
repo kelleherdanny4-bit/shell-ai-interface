@@ -1,0 +1,27 @@
+{
+  "name": "shell",
+  "version": "1.0.0",
+  "description": "A doc-first, cinematic interface for talking with Claude",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "demo": "DEMO=1 node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kelleherdanny4-bit/shell-ai-interface.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kelleherdanny4-bit/shell-ai-interface/issues"
+  },
+  "homepage": "https://github.com/kelleherdanny4-bit/shell-ai-interface#readme",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.9.0",
+    "dompurify": "^3.4.18",
+    "marked": "^18.2.1"
+  },
+  "type": "module",
+  "private": true
+}
