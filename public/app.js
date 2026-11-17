@@ -26,7 +26,6 @@ const state = {
   projects: [],
   projectId: null,
   riverPads: {},
-  riverness: 0, // 0 = hills, 1 = meadow and water (zoomed out)
   cam: { x: 0, y: 0, s: 1, r: 0 },
   layout: { docW: 820, docH: 600, cx: 0, cy: 0, wide: true },
 };
@@ -43,11 +42,14 @@ function measure() {
   // Reserve room for the "notes ready" chip so the doc never sits under it.
   const composerH = Math.round($(".composer-row").getBoundingClientRect().height + ($("#composer-meta").offsetHeight || 0)) + 64;
   document.documentElement.style.setProperty("--composer-h", composerH + "px");
-  const notesW = 320;
-  const avail = wide ? vw - notesW - 48 - 130 : vw <= 760 ? vw - 24 : vw - 140;
+  // On wide screens your notes are pencilled in the margin right of the sheet.
+  const margW = 250;
+  const avail = wide ? vw - margW - 120 : vw <= 760 ? vw - 24 : vw - 140;
   const docW = Math.round(Math.max(300, Math.min(820, avail)));
   const docH = Math.round(Math.max(320, vh - topH - composerH - 16));
-  const cx = Math.round(wide ? (vw - notesW - 16) / 2 : vw / 2);
+  // Centre the sheet when there's room; otherwise slide it left to keep the margin.
+  const cx = Math.round(wide ? Math.min(vw / 2, vw - margW - 44 - docW / 2) : vw / 2);
+  document.documentElement.style.setProperty("--cx", cx + "px");
   const cy = Math.round(topH + (vh - topH - composerH) / 2 + 4);
   Object.assign(state.layout, { vw, vh, wide, topH, composerH, docW, docH, cx, cy });
   document.documentElement.style.setProperty("--doc-h", docH + "px");
@@ -103,7 +105,7 @@ function applyCam() {
   const c = state.cam;
   world.style.transform = `translate(${cx}px,${cy}px) scale(${c.s}) rotate(${-c.r}deg) translate(${-c.x}px,${-c.y}px)`;
   // Semantic zoom: far away, docs turn into lily pads that show only a title.
-  document.body.classList.toggle("far", c.s < 0.5);
+  document.body.classList.toggle("far", c.s < 0.5 && !state.holdNear);
   world.style.setProperty("--inv", (1 / c.s).toFixed(3));
 }
 
@@ -117,6 +119,7 @@ function flyTo(target, { duration, dip = true } = {}) {
   // Prezi-style swoop: zoom out mid-flight, more for longer trips.
   const k = dip ? Math.max(0.45, Math.min(0.94, 1 - dist / (dist + state.layout.vw * 0.9))) : 1;
   const t0 = performance.now();
+  state.holdNear = from.s >= 0.5 && target.s >= 0.5; // a hop between sheets, not a zoom out
   world.classList.add("flying");
   if (flight) cancelAnimationFrame(flight.raf);
   return new Promise((resolve) => {
@@ -135,6 +138,7 @@ function flyTo(target, { duration, dip = true } = {}) {
         Object.assign(state.cam, target);
         applyCam();
         world.classList.remove("flying");
+        state.holdNear = false;
         flight = null;
         resolve();
       }
@@ -149,7 +153,7 @@ function camForDoc(i) {
 }
 
 function camForOverview() {
-  const { docW, docH, vw, vh, topH, composerH, wide } = state.layout;
+  const { docW, docH, vw, vh, topH, composerH } = state.layout;
   if (!state.docs.length) return { x: 0, y: 0, s: 1, r: 0 };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   // Frame the pads around where you are (up to five), so titles stay readable.
@@ -158,7 +162,7 @@ function camForOverview() {
     minX = Math.min(minX, d.pos.x - docW * 0.6); maxX = Math.max(maxX, d.pos.x + docW * 0.6);
     minY = Math.min(minY, d.pos.y - docH * 0.6); maxY = Math.max(maxY, d.pos.y + docH * 0.6);
   }
-  const availW = (wide ? vw - 352 : vw) - 60, availH = vh - topH - composerH - 30;
+  const availW = vw - 60, availH = vh - topH - composerH - 30;
   const s = Math.min(availW / (maxX - minX), availH / (maxY - minY), 0.36);
   return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, s, r: 0 };
 }
@@ -174,6 +178,7 @@ async function focusDoc(i, opts = {}) {
   renderNotes();
   hidePopover();
   await flyTo(camForDoc(i), opts);
+  if (state.focus === i) positionMarginalia(state.docs[i]);
 }
 
 // O zooms out one level: doc → lily pads → the river of projects.
@@ -220,12 +225,16 @@ function makeDoc(d) {
     <div class="doc-head"><span class="idx"></span><span class="time">${fmtTime(d.at)}</span><span class="spacer"></span><span class="prompt" title="">${headPrompt(d.user)}</span></div>
     <div class="doc-scroll"><div class="doc-body"></div></div>
     <div class="inscription"><span class="date"></span><span class="ed"></span></div>
+    <aside class="marginalia" aria-label="Your notes on this doc"></aside>
     <div class="pad" aria-hidden="true"><span class="lily"></span><span class="pad-title"></span></div>`;
   d.el = el;
+  d.marginEl = $(".marginalia", el);
   setPadTitle(d);
   d.bodyEl = $(".doc-body", el);
   d.scrollEl = $(".doc-scroll", el);
   if (d.user?.display?.text) $(".prompt", el).title = d.user.display.text;
+  let tick = 0;
+  d.scrollEl.addEventListener("scroll", () => { tick ||= requestAnimationFrame(() => { tick = 0; positionMarginalia(d); }); }, { passive: true });
   el.addEventListener("click", () => {
     const i = state.docs.indexOf(d);
     if (state.overview || i !== state.focus) focusDoc(i);
@@ -407,11 +416,73 @@ function renderNotes() {
     list.appendChild(card);
   }
   paintHighlights();
+  state.docs.forEach(renderMarginalia);
+  document.body.classList.toggle("has-notes", n > 0);
   // composer chip
   $("#attach").hidden = !n;
   $(".attach-count").textContent = n;
   // constellation dots
   updateNav();
+}
+
+// Pencil notes in the margin beside the sheet, each level with the words it is about.
+function renderMarginalia(d) {
+  const box = d.marginEl;
+  if (!box) return;
+  box.innerHTML = "";
+  const notes = state.notes.filter((n) => n.docId === d.id).sort((a, b) => a.start - b.start);
+  for (const note of notes) {
+    const el = document.createElement("div");
+    el.className = "pencil-note";
+    el.innerHTML = `<span class="n" contenteditable="plaintext-only" spellcheck="false"></span><button class="del" title="Erase this note" aria-label="Erase this note">×</button>`;
+    el.note = note;
+    const nEl = $(".n", el);
+    nEl.textContent = note.note;
+    nEl.addEventListener("blur", () => {
+      const v = nEl.textContent.trim();
+      if (v && v !== note.note) { note.note = v; saveNotes(); } else nEl.textContent = note.note;
+    });
+    nEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); nEl.blur(); } });
+    $(".del", el).addEventListener("click", (e) => {
+      e.stopPropagation();
+      state.notes = state.notes.filter((x) => x.id !== note.id);
+      saveNotes();
+    });
+    el.addEventListener("mouseenter", () => paintHighlights(note.id));
+    el.addEventListener("mouseleave", () => paintHighlights());
+    box.appendChild(el);
+  }
+  positionMarginalia(d);
+}
+
+// Where a note's words sit down the sheet, measured in the sheet's own pixels.
+function noteAnchorY(d, note) {
+  // The first text node that actually holds the note's first character.
+  const walker = document.createTreeWalker(d.bodyEl, NodeFilter.SHOW_TEXT);
+  let pos = 0, node, block = null;
+  while ((node = walker.nextNode())) {
+    if (pos + node.data.length > note.start) { block = node; break; }
+    pos += node.data.length;
+  }
+  while (block && block.parentNode !== d.bodyEl) block = block.parentNode;
+  if (!block || block.nodeType !== 1) return 0;
+  // How far down its block the first line of the quote starts.
+  const r = rangeFromOffsets(d.bodyEl, note.start, note.end);
+  const first = r && [...r.getClientRects()].find((q) => q.width > 0.5);
+  const dy = first ? Math.max(0, (first.top - block.getBoundingClientRect().top) / (state.cam.s || 1)) : 0;
+  return block.offsetTop + d.bodyEl.offsetTop + d.scrollEl.offsetTop - d.scrollEl.scrollTop + dy;
+}
+
+function positionMarginalia(d) {
+  const H = d.el.clientHeight;
+  let floor = 6;
+  for (const el of d.marginEl?.children || []) {
+    const a = noteAnchorY(d, el.note);
+    const y = Math.max(floor, Math.min(a, H - 34));
+    el.style.top = y + "px";
+    el.classList.toggle("off", a < -12 || a > H - 20); // its words are scrolled out of view
+    floor = y + el.offsetHeight + 8;
+  }
 }
 
 async function jumpToNote(note) {
@@ -649,7 +720,7 @@ const WELCOME = `# Welcome to Shell
 
 ## Try it now
 
-Select this sentence and tap **✓ Yes**. Watch it light up and land in your notes.`;
+Select this sentence and tap **✓ Yes**. Watch it land in pencil in the margin.`;
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -828,20 +899,21 @@ const TEX = { grain: makeGrain(), washi: makeWashi() };
 document.documentElement.style.setProperty("--grain", `url(${TEX.grain.toDataURL()})`);
 document.documentElement.style.setProperty("--washi", `url(${TEX.washi.toDataURL()})`);
 
-// ---------------------------------------------------------------- landscape
-// A printed landscape that follows the real time of day (?hour=19 previews dusk).
-// Halftone sky, flat woodblock hills printed a hair out of register, a red sun.
+// ---------------------------------------------------------------- paper and light
+// The ground is one bare sheet of washi. Nothing is drawn on it. What changes
+// with the real time of day (?hour=19 previews dusk) is the light: the tone of
+// the paper, and the direction and length of the shadow the reading sheet casts.
 
-const PAPER = [239, 233, 219];
+const PAPER = [229, 221, 205];
 const SCENES = [
-  { h: 0,    ink: "#2d3b55", dens: 0.82, far: "#6b7688", near: "#2c3444", sun: "#efe5cc", sun2: "#b9c2cf", meadow: "#5d6b5a" },
-  { h: 5.5,  ink: "#6d5a78", dens: 0.55, far: "#a596a3", near: "#4b4a58", sun: "#e0866a", sun2: "#e9b9b1", meadow: "#8a9575" },
-  { h: 7.5,  ink: "#b88a83", dens: 0.32, far: "#cdbdb3", near: "#7a8669", sun: "#d8573f", sun2: "#ecb3a6", meadow: "#a8b68a" },
-  { h: 12,   ink: "#7b9cb0", dens: 0.24, far: "#bccab9", near: "#7f9b6b", sun: "#d45138", sun2: "#e9b3ab", meadow: "#a9bd8b" },
-  { h: 17.5, ink: "#c0905a", dens: 0.34, far: "#d5c29e", near: "#868157", sun: "#cf5132", sun2: "#e7b48c", meadow: "#b0b37f" },
-  { h: 19.6, ink: "#5e5478", dens: 0.6,  far: "#a68ea0", near: "#40394f", sun: "#e17656", sun2: "#e7b2a8", meadow: "#7d7f6a" },
-  { h: 21.5, ink: "#2f3d57", dens: 0.8,  far: "#6c788a", near: "#2d3545", sun: "#efe5cc", sun2: "#b9c2cf", meadow: "#5f6d5b" },
-  { h: 24,   ink: "#2d3b55", dens: 0.82, far: "#6b7688", near: "#2c3444", sun: "#efe5cc", sun2: "#b9c2cf", meadow: "#5d6b5a" },
+  { h: 0,    ink: "#2d3b55", dens: 0.82 },
+  { h: 5.5,  ink: "#6d5a78", dens: 0.55 },
+  { h: 7.5,  ink: "#b88a83", dens: 0.3 },
+  { h: 12,   ink: "#8a8f8c", dens: 0.2 },
+  { h: 17.5, ink: "#c0905a", dens: 0.32 },
+  { h: 19.6, ink: "#5e5478", dens: 0.6 },
+  { h: 21.5, ink: "#2f3d57", dens: 0.8 },
+  { h: 24,   ink: "#2d3b55", dens: 0.82 },
 ];
 const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
 const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
@@ -853,8 +925,16 @@ function sceneAt(hour) {
   const A = SCENES[i], B = SCENES[i + 1];
   const t = (hour - A.h) / (B.h - A.h);
   const st = t * t * (3 - 2 * t);
-  const m = (k) => mix(hex(A[k]), hex(B[k]), st);
-  return { ink: m("ink"), far: m("far"), near: m("near"), sun: m("sun"), sun2: m("sun2"), meadow: m("meadow"), dens: A.dens + (B.dens - A.dens) * st };
+  return { ink: mix(hex(A.ink), hex(B.ink), st), dens: A.dens + (B.dens - A.dens) * st };
+}
+
+// One light source. By day it crosses from the left (morning) to the right
+// (evening): shadows fall away from it, short at noon and long near the horizon.
+// At night a single lamp sits high and a little to the right.
+function lightAt(hour) {
+  if (hour < 6 || hour > 18.5) return { sx: -0.22, sy: 0.62, sa: 1.25 };
+  const arc = (hour - 6) / 12.5, el = Math.sin(Math.PI * arc), len = 1.5 - 0.85 * el;
+  return { sx: Math.cos(Math.PI * arc) * len, sy: (0.45 + 0.3 * el) * len, sa: 1 };
 }
 
 function landscape() {
@@ -865,143 +945,58 @@ function landscape() {
     const d = new Date();
     return d.getHours() + d.getMinutes() / 60;
   };
-  let W, H, dpr, sky = null, scene = sceneAt(hourNow()), sceneT = -Infinity, grainPat, washiPat;
-  const LAYERS = [0, 1, 2, 3].map((i) => {
-    const r = rnd(97 + i * 131);
-    const waves = Array.from({ length: 4 }, (_, k) => ({ f: (0.0008 + r() * 0.0013) * (k + 1) ** 1.3, a: (1 / (k + 1) ** 1.05) * (0.6 + r() * 0.8), p: r() * 6.28 }));
-    return { i, depth: 0.09 + i * 0.09, base: 0.56 + i * 0.11, amp: 0.05 + i * 0.025, waves };
-  });
-
-  const sunPos = () => {
-    const hr = hourNow();
-    const night = scene.dens > 0.6;
-    const arc = Math.min(1, Math.max(0, night ? ((hr + 6) % 24) / 12 : (hr - 6) / 12));
-    return { x: W * (0.18 + 0.64 * arc), y: H * (0.5 - 0.32 * Math.sin(Math.PI * arc)), r: Math.min(W, H) * 0.075 };
-  };
-
-  // The halftone sky is printed once per scene/size: dots grow where the sky is darker.
-  function printSky() {
-    sky = document.createElement("canvas");
-    sky.width = W; sky.height = H;
-    const g = sky.getContext("2d");
-    g.fillStyle = rgb(PAPER); g.fillRect(0, 0, W, H);
-    const step = 7 * dpr, sp = sunPos();
-    g.fillStyle = rgb(scene.ink, 0.9);
-    for (let row = 0, y = 0; y < H * 0.85; row++, y += step * 0.87) {
-      for (let x = (row % 2) * step / 2; x < W; x += step) {
-        const fall = 1 - y / (H * 0.85);                       // darker toward the top
-        const dSun = Math.hypot(x - sp.x, y - sp.y) / (sp.r * 5);
-        let v = scene.dens * (0.35 + 0.65 * fall) - Math.max(0, 1 - dSun) * 0.35;
-        v += (Math.sin(x * 0.004 + y * 0.011) + Math.sin(x * 0.0021 - y * 0.007)) * 0.04; // a cloud's breath
-        if (v <= 0.02) continue;
-        g.beginPath();
-        g.arc(x, y, (step / 2) * Math.sqrt(Math.min(1, v)), 0, 6.283);
-        g.fill();
-      }
-    }
-  }
+  let W, H, dpr, scene, light, sceneT = -Infinity, washiPat, last = "";
 
   const resize = () => {
     dpr = Math.min(1.5, devicePixelRatio || 1);
     W = cv.width = Math.round(innerWidth * dpr); H = cv.height = Math.round(innerHeight * dpr);
-    grainPat = ctx.createPattern(TEX.grain, "repeat");
     washiPat = ctx.createPattern(TEX.washi, "repeat");
-    printSky();
+    last = "";
   };
   resize();
   addEventListener("resize", resize);
 
-  const hill = (L, ox, oy, c) => {
-    const off = c.x * L.depth * 0.35 + ox;
-    const rise = Math.max(-1.6, Math.min(0.4, Math.log(c.s)));
-    const baseY = H * (L.base - rise * L.depth * 0.45) - c.y * L.depth * 0.12 * dpr + oy;
-    ctx.beginPath();
-    ctx.moveTo(-10, H + 10);
-    for (let x = -10; x <= W + 12; x += 10) {
-      const wx = (x / dpr + off) * (1 + L.i * 0.12);
-      let h = 0;
-      for (const w of L.waves) h += Math.sin(wx * w.f + w.p) * w.a;
-      ctx.lineTo(x, baseY - h * H * L.amp);
-    }
-    ctx.lineTo(W + 10, H + 10);
-    ctx.closePath();
-  };
-
   const frame = (now) => {
     if (now - sceneT > 30000) {
-      const next = sceneAt(hourNow());
-      const changed = !sky || Math.abs(next.dens - scene.dens) > 0.01 || next.ink.some((v, i) => Math.abs(v - scene.ink[i]) > 2);
-      scene = next; sceneT = now;
-      if (changed) printSky();
+      const hr = hourNow();
+      scene = sceneAt(hr); light = lightAt(hr); sceneT = now; last = "";
       document.body.classList.toggle("night", scene.dens > 0.6);
       const rs = document.documentElement.style;
+      rs.setProperty("--sx", light.sx.toFixed(3));
+      rs.setProperty("--sy", light.sy.toFixed(3));
+      rs.setProperty("--sa", light.sa.toFixed(2));
       // Water is always a pale printed blue, just dimmed a little at night.
       rs.setProperty("--water-a", rgb(mix([150, 182, 198], [52, 66, 92], Math.max(0, scene.dens - 0.3) * 0.6)));
       rs.setProperty("--water-b", rgb(mix([136, 170, 188], [48, 62, 88], Math.max(0, scene.dens - 0.3) * 0.6)));
       rs.setProperty("--bank", rgb(mix(scene.ink, [70, 90, 110], 0.5)));
     }
-    const c = state.cam;
-    const want = state.view === "river" || document.body.classList.contains("far") ? 1 : 0;
-    state.riverness += (want - state.riverness) * 0.09;
-    if (Math.abs(want - state.riverness) < 0.01) state.riverness = want;
+    // Only repaint when the camera has moved: the paper is still otherwise.
+    const c = state.cam, { cx = 0, cy = 0 } = state.layout;
+    const key = [c.x, c.y, c.s, c.r, cx, cy].map((v) => v.toFixed(2)).join();
+    if (key !== last) {
+      last = key;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = rgb(mix(PAPER, scene.ink, scene.dens * 0.42));
+      ctx.fillRect(0, 0, W, H);
 
-    ctx.drawImage(sky, 0, 0);
-    if (state.riverness < 0.6) {
-    // The sun: a flat disc, printed twice a little out of register.
-    const sp = sunPos();
-    const lift = Math.max(-1.6, Math.min(0.4, Math.log(c.s))) * H * 0.05;
-    ctx.fillStyle = rgb(scene.sun2, 0.85);
-    ctx.beginPath(); ctx.arc(sp.x + 5 * dpr, sp.y - lift + 3 * dpr, sp.r, 0, 6.283); ctx.fill();
-    ctx.fillStyle = rgb(scene.sun);
-    ctx.beginPath(); ctx.arc(sp.x, sp.y - lift, sp.r, 0, 6.283); ctx.fill();
-    }
-
-    // Hills: flat colour + woodgrain, each with a faint second pass offset.
-    for (const L of LAYERS) {
-      // Nearer hills print darker, for depth and contrast.
-      const col = mix(mix(scene.far, scene.near, L.i / 3), scene.ink, L.i * 0.07);
-      hill(L, 6, -4 * dpr, c);
-      ctx.fillStyle = rgb(mix(col, scene.ink, 0.25), 0.35);
-      ctx.fill();
-      hill(L, 0, 0, c);
-      ctx.fillStyle = rgb(col);
-      ctx.fill();
-      ctx.save();
-      ctx.globalCompositeOperation = "multiply";
+      // The paper's fibres belong to the world, not the screen: they slide, turn
+      // and scale with the camera, so sheets feel laid on a real surface.
+      const fs = Math.max(0.55, c.s); // keep fibres from turning to dust far out
+      washiPat.setTransform(new DOMMatrix().translate(cx * dpr, cy * dpr).scale(fs * dpr).rotate(-c.r).translate(-c.x * (c.s / fs), -c.y * (c.s / fs)));
       ctx.globalAlpha = 0.55;
-      ctx.translate((-c.x * L.depth * 0.35 * dpr) % 512, L.i * 97);
-      ctx.fillStyle = grainPat;
-      ctx.fill();
-      ctx.restore();
-    }
-
-    // Zoomed out: a flat meadow block printed over everything, seen from above.
-    if (state.riverness > 0.01) {
-      ctx.save();
-      ctx.globalAlpha = state.riverness;
-      // Seen from above, the land is bare paper: lots of quiet empty space.
-      ctx.fillStyle = rgb(mix(PAPER, scene.ink, scene.dens * 0.45));
+      ctx.fillStyle = washiPat;
       ctx.fillRect(0, 0, W, H);
-      ctx.globalCompositeOperation = "multiply";
-      ctx.globalAlpha = state.riverness * 0.12;
-      ctx.fillStyle = grainPat;
+      ctx.globalAlpha = 1;
+
+      // Light pools on the side it comes from and falls off toward the other.
+      const n = Math.hypot(light.sx, light.sy) || 1, ux = light.sx / n, uy = light.sy / n, R = Math.hypot(W, H) * 0.55;
+      const lg = ctx.createLinearGradient(W / 2 - ux * R, H / 2 - uy * R, W / 2 + ux * R, H / 2 + uy * R);
+      lg.addColorStop(0, "rgba(255,252,244,0.20)");
+      lg.addColorStop(0.5, "rgba(255,252,244,0)");
+      lg.addColorStop(1, `rgba(30,24,18,${0.13 + scene.dens * 0.12})`);
+      ctx.fillStyle = lg;
       ctx.fillRect(0, 0, W, H);
-      ctx.restore();
     }
-
-    // A soft vignette: the edges fall into shadow so the paper sheets stand out.
-    const vg = ctx.createRadialGradient(W * 0.42, H * 0.48, Math.min(W, H) * 0.25, W * 0.5, H * 0.5, Math.max(W, H) * 0.78);
-    vg.addColorStop(0, "rgba(30,24,18,0)");
-    vg.addColorStop(1, `rgba(30,24,18,${0.34 + scene.dens * 0.15})`);
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, W, H);
-
-    // Paper fibres over the whole print
-    ctx.save();
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = washiPat;
-    ctx.fillRect(0, 0, W, H);
-    ctx.restore();
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
@@ -1122,7 +1117,6 @@ async function showRiver({ instant = false } = {}) {
   document.body.classList.add("river");
   if (instant) {
     setRiverCam(fit, false);
-    state.riverness = 1;
     return;
   }
   // The docs sink away while the river rises up from this project's pad.
@@ -1277,8 +1271,24 @@ addEventListener("resize", () => {
   }, 80);
 });
 
+// Chrome gets out of the way: after a few still seconds only the sheet remains.
+function quietChrome() {
+  if (!matchMedia("(hover: hover)").matches) return;
+  let t;
+  const wake = () => {
+    document.body.classList.remove("idle");
+    clearTimeout(t);
+    t = setTimeout(() => document.body.classList.add("idle"), 3200);
+  };
+  addEventListener("pointermove", wake, { passive: true });
+  addEventListener("pointerdown", wake, { passive: true });
+  addEventListener("keydown", (e) => { if (!e.target.closest?.("textarea, input, [contenteditable]")) wake(); });
+  wake();
+}
+
 async function boot() {
   measure();
+  quietChrome();
   landscape();
   overviewControls();
   voice();

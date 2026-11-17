@@ -58,7 +58,7 @@ first run; it stays on your computer). Each one is a lily pad on the river.
 | Ask | Type in the bottom bar (or tap the mic). Enter sends. |
 | React to a line | Select text → **Note**, or **Y / X / W / M** for Yes / No / Why? / More |
 | React to a paragraph | Hover it, tap the **+** in the left margin |
-| Edit a note | Click its text in the Notes panel |
+| Edit a note | Click its pencil text in the margin beside the doc. Hover it and tap **×** to erase |
 | Send notes | **Send**. Typed text goes along as "Also: …" |
 | Move between docs | **← →** or the dots in the top bar |
 | Zoom out | **O**: docs become lily pads with just their titles. **O** again: the river of all projects |
@@ -78,7 +78,7 @@ Unsent notes are saved in the browser, so a reload never loses them.
 | `SHELL_MODEL` / `SHELL_EFFORT` | `claude-opus-5-5` / `medium` | `api` mode only |
 | `PORT` | `4747` | |
 
-Add `?hour=21` to the address to preview the landscape at night.
+Add `?hour=21` to the address to preview the light at night. Shadows follow the real time of day.
 
 ## How it's built
 

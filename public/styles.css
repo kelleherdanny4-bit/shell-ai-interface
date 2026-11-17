@@ -705,3 +705,134 @@ body.far .doc:not(.focused), body.overview .doc { filter: none; }
 .doc .pad { width: calc(var(--doc-w) * 0.9); height: calc(var(--doc-w) * 0.9); }
 .pad-title { font-size: min(calc(15px * var(--inv, 1)), calc(var(--doc-w) * 0.075)); }
 .pad-title { font-size: calc(var(--doc-w) * 0.105); max-width: 78%; }
+
+/* =================================================================
+   QUIET EDITION (doc view)
+   One sheet on a lot of bare paper. Three colours only: paper, graphite,
+   one red. One light source: --sx / --sy / --sa are set from the time of
+   day in app.js, so every shadow falls the same way. Chrome has no boxes.
+   Overrides the rules above.
+   ================================================================= */
+:root { --sx: 0.5; --sy: 0.6; --sa: 1; --shade: 30 22 14; }
+
+/* ---- the sheet and its shadow ---- */
+.doc {
+  border-radius: 2px;
+  /* lying flat: only a tight contact shadow */
+  box-shadow: 0 0 0 .5px rgb(var(--shade) / .10), 0 1px 1px rgb(var(--shade) / .14),
+    calc(var(--sx) * 3px) calc(var(--sy) * 4px) 7px -2px rgb(var(--shade) / calc(var(--sa) * .16));
+  transition: opacity .9s var(--ease), box-shadow 1.2s var(--ease), background-color .6s var(--ease);
+}
+body:not(.far) .doc:not(.focused) { opacity: 1; filter: none; }
+body:not(.far) .doc:not(.focused) > .doc-head,
+body:not(.far) .doc:not(.focused) > .doc-scroll,
+body:not(.far) .doc:not(.focused) > .inscription { opacity: .32; }
+/* the sheet you are reading lifts: contact, near, mid and a long soft far shadow */
+body:not(.far) .doc.focused {
+  box-shadow: 0 0 0 .5px rgb(var(--shade) / .14), 0 1px 1px rgb(var(--shade) / .24),
+    calc(var(--sx) * 6px) calc(var(--sy) * 8px) 10px -2px rgb(var(--shade) / calc(var(--sa) * .26)),
+    calc(var(--sx) * 26px) calc(var(--sy) * 32px) 38px -8px rgb(var(--shade) / calc(var(--sa) * .26)),
+    calc(var(--sx) * 80px) calc(var(--sy) * 100px) 120px -20px rgb(var(--shade) / calc(var(--sa) * .34));
+}
+/* in flight the sheet is held higher: the shadow travels further and softens, then settles */
+body:not(.far) #world.flying .doc.focused {
+  box-shadow: 0 0 0 .5px rgb(var(--shade) / .10), 0 1px 1px rgb(var(--shade) / .10),
+    calc(var(--sx) * 14px) calc(var(--sy) * 18px) 24px -4px rgb(var(--shade) / calc(var(--sa) * .18)),
+    calc(var(--sx) * 54px) calc(var(--sy) * 68px) 80px -10px rgb(var(--shade) / calc(var(--sa) * .20)),
+    calc(var(--sx) * 150px) calc(var(--sy) * 190px) 200px -24px rgb(var(--shade) / calc(var(--sa) * .26));
+}
+/* no water behind the sheet: the river only appears once you zoom out */
+body:not(.far) #links .bank, body:not(.far) #links .water, body:not(.far) #links .shimmer { opacity: 0; }
+/* the pencil line that joins one doc to the next */
+#links path.trail { stroke: var(--ink); stroke-opacity: .3; stroke-width: 1.2; stroke-dasharray: 2 10; animation: none; }
+
+/* ---- inside the sheet: graphite only ---- */
+.doc-body h2::before { display: none; }
+.doc-body strong { background: none; }
+.doc-body blockquote {
+  background: none; box-shadow: none; border-radius: 0; border-left: 2px solid var(--shu);
+  padding: 2px 0 2px 24px; margin: 4px 0 34px; font-weight: 600; font-size: 22px; line-height: 1.55; color: var(--ink);
+}
+.doc-body ul > li::before { background: var(--ink); }
+.doc-body ol > li::before { color: var(--ink); }
+.doc-body a { color: var(--ink); text-decoration-color: rgb(26 23 20 / .4); }
+.doc-body ::selection { background: rgb(26 23 20 / .16); }
+.doc-head .prompt b { color: var(--ink); }
+.gutter { color: var(--ink); }
+.gutter:hover { background: var(--ink); color: var(--paper); }
+.doc.sweep .doc-scroll::after { display: none; }
+/* your marks are the red: a fine underline where you left a note */
+::highlight(note) { background-color: rgba(207, 79, 54, .06); text-decoration: underline; text-decoration-color: rgba(207, 79, 54, .8); text-decoration-thickness: 1px; text-underline-offset: 5px; }
+::highlight(note-active) { background-color: rgba(207, 79, 54, .22); text-decoration: underline; text-decoration-color: #cf4f36; text-decoration-thickness: 1px; text-underline-offset: 5px; }
+
+/* ---- pencil notes in the margin beside the sheet ---- */
+.marginalia { display: none; position: absolute; left: calc(100% + 22px); top: 0; width: 240px; height: 100%; pointer-events: none; transition: opacity .7s var(--ease); }
+body.wide .marginalia { display: block; }
+body.far .marginalia, .doc:not(.focused) .marginalia { opacity: 0; visibility: hidden; }
+.pencil-note {
+  position: absolute; left: 0; right: 0; padding-left: 30px; pointer-events: auto;
+  font-family: var(--font-pencil); font-size: 24px; line-height: 1.12; color: #453e36;
+  transform: rotate(-1.4deg); transform-origin: 0 50%;
+  transition: top .4s var(--ease), opacity .4s var(--ease); animation: pencil-in .6s var(--ease) both;
+}
+.pencil-note:nth-child(even) { transform: rotate(.8deg); }
+.pencil-note::before { content: ""; position: absolute; left: 0; top: .56em; width: 20px; height: 1.5px; background: var(--shu); }
+.pencil-note.off { opacity: .3; }
+.pencil-note .n { outline: none; cursor: text; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pencil-note .n:focus { color: var(--ink); }
+.pencil-note .del { position: absolute; left: 100%; top: 0; border: 0; background: none; padding: 0 8px; font: 500 18px/1.3 var(--font-body); color: var(--muted); opacity: 0; transition: opacity .2s; }
+.pencil-note:hover .del, .pencil-note .del:focus-visible { opacity: 1; }
+.pencil-note .del:hover { color: var(--shu); }
+@keyframes pencil-in { from { opacity: 0; clip-path: inset(0 100% 0 0); } to { opacity: 1; clip-path: inset(0 -40px 0 0); } }
+body.wide #notes-panel { display: none; }
+
+/* ---- chrome: no boxes, and it leaves when you are still ---- */
+#hud-top .pill, .status, .hud-btn, #constellation .track, .edge-nav, #btn-mic, #attach-clear { background: none; box-shadow: none; }
+.hud-btn:hover, .edge-nav:hover, #hud-top .pill .hud-btn:hover { background: rgb(26 23 20 / .07); transform: none; }
+.hud-btn.active { background: var(--ink); }
+.brand-ring { box-shadow: none; border-radius: 50%; }
+.crumb-project { color: var(--ink); }
+#constellation button.on span, .status.live .dot { box-shadow: none; }
+#constellation button.has-notes span { background: none; box-shadow: inset 0 0 0 1.5px var(--shu); }
+#constellation button.on.has-notes span { background: var(--shu); }
+.status .dot { background: none; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.status.live .dot { background: var(--shu); }
+.edge-nav { opacity: .5; } .edge-nav:hover { opacity: 1; }
+.edge-nav.right { right: 18px; }
+#hud-top, .edge-nav, .composer-meta { transition: opacity .9s var(--ease); }
+body.idle #hud-top:not(:focus-within), body.idle .edge-nav:not(:focus-visible), body.idle .composer-meta { opacity: 0; }
+body.idle.river #hud-top, body.idle.far #hud-top { opacity: 1; }
+
+/* ---- the composer: one ruled line at the foot of the sheet ---- */
+#composer, body.wide #composer { left: var(--cx, 50%); width: min(var(--doc-w, 820px), calc(100vw - 32px)); }
+.composer-row, .composer-row:focus-within { background: none; box-shadow: none; }
+.composer-row { border-radius: 0; padding: 2px 0; align-items: center; border-bottom: 1px solid rgb(26 23 20 / .32); transition: border-color .5s var(--ease); }
+.composer-row:focus-within { border-bottom-color: var(--ink); }
+#input { font-size: 18px; }
+#input::placeholder { color: rgb(26 23 20 / .45); }
+#orb .core { box-shadow: none; }
+#btn-send { background: none; color: var(--ink); height: 40px; padding: 0 2px 0 12px; border-radius: 0; font-family: var(--font-body); font-weight: 700; font-size: 12px; letter-spacing: .22em; text-transform: uppercase; transition: opacity .4s var(--ease), color .2s; }
+#btn-send:hover { background: none; color: var(--shu); transform: none; }
+#input:placeholder-shown ~ #btn-send { opacity: .28; }
+body.has-notes #input ~ #btn-send { opacity: 1; color: var(--shu); }
+body.night #attach-chip { color: var(--ink); }
+#btn-send[disabled] { opacity: .2; }
+.composer-meta { color: var(--ink-2); opacity: .75; }
+body.night .composer-meta, body.night.far .composer-meta, body.night.river .composer-meta { color: var(--ink); }
+/* "3 notes ready to send": pencilled above the line, not a chip */
+#attach-chip { background: none; box-shadow: none; padding: 0; font-family: var(--font-pencil); font-size: 22px; font-weight: 500; color: #453e36; }
+#attach-chip .attach-count { color: var(--shu); font-weight: 500; }
+#attach-clear { font-family: var(--font-pencil); font-size: 19px; color: var(--muted); padding: 0 6px; text-decoration: underline; text-underline-offset: 3px; }
+body.wide #attach-chip { cursor: default; }
+
+/* ---- small sheets: soft shadow from the same light, no colour blocks ---- */
+#popover { box-shadow: 0 0 0 .5px rgb(var(--shade) / .14), 0 1px 1px rgb(var(--shade) / .18), calc(var(--sx) * 10px) calc(var(--sy) * 14px) 26px -8px rgb(var(--shade) / .4); }
+#popover button.primary { background: var(--ink); color: var(--paper); }
+#popover button.primary:hover { background: #000; }
+.note-card { box-shadow: 0 1px 2px rgb(var(--shade) / .16), 0 8px 16px -10px rgb(var(--shade) / .35); }
+
+@media (max-width: 760px) {
+  .doc-head { padding: 14px 24px 8px; }
+  .doc-scroll { padding: 12px 24px 48px; }
+  .doc-body blockquote { font-size: 19px; padding-left: 18px; }
+}

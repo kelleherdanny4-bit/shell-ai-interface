@@ -27,13 +27,25 @@ The camera flies between docs (Prezi-style).
 - **Zoom levels:** doc → **O** → docs become lily pads on a stream showing only
   titles (five framed at a time) → **O** again → the river of all projects as
   pads, clients in their own pond. **P** jumps to the river.
-- **Look ("print edition"):** inspired by Tetsuya Noda's printmaking
-  (technique only, never his images): washi paper texture, halftone sky by
-  time of day, flat woodgrain hills printed slightly off-register, red sun,
-  Shippori Mincho headings + Zen Kaku Gothic New body + Caveat pencil dates
-  in each doc's margin, red seal that stamps while Claude works. Then a
-  contrast pass: darker letterpress-style text, layered shadows, vignette.
-  `?hour=21` previews night.
+- **Look ("quiet edition", doc view only so far):** after Danny said the
+  print edition was still far from "Tetsuya Noda meets Prezi". The rule now:
+  one sheet on a lot of bare washi, three colours only (paper, graphite, one
+  red), one light source.
+  - No hills, sky or river behind the doc. The canvas is bare paper whose
+    fibres move with the camera.
+  - Shadows come from one light that follows the time of day (`--sx`, `--sy`,
+    `--sa`, set in `app.js`): falls right in the morning, short at noon, left
+    in the evening, lamp at night. The sheet you read lifts; others lie flat.
+  - Notes are pencilled in the margin right of the sheet, level with their
+    words (wide screens). The old notes panel only shows under 1200px.
+  - Chrome has no boxes and fades after ~3 still seconds. The composer is one
+    ruled line under the sheet.
+  - `?hour=21` previews night. Still to do in this style: lily pads, the
+    thread overview and the river (points 3 and 5 of the critique below).
+- **Critique Danny agreed to (2026-11-17):** 1) empty the page, 2) one light
+  source, 3) one world and one continuous camera from river to doc, 4) kill
+  the chrome, 5) projects as small grey halftone prints, not lily pads.
+  1, 2 and 4 are done for the doc view.
 
 ## Code map
 
@@ -43,11 +55,13 @@ The camera flies between docs (Prezi-style).
 - `public/app.js` — camera, docs, notes/highlights, composer, printed
   landscape canvas, river view.
 - `public/styles.css` — layered: base → nature theme → lily pads/river →
-  PRINT EDITION → CONTRAST PASS (later blocks override earlier ones; worth
-  consolidating at some point).
+  PRINT EDITION → CONTRAST PASS → QUIET EDITION (later blocks override
+  earlier ones; consolidate once the look is settled).
 
 ## Danny's open decisions (ask one at a time)
 
+0. Does the quiet-edition doc view feel right? If yes, carry it to the
+   overview and river (critique points 3 and 5).
 1. Text weight: right now, or one step heavier?
 2. Pencil margin: keep the date, or show the project name?
 3. Let Claude edit files from Shell? Proposal: a confirm button in the doc
