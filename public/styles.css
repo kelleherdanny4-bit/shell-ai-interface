@@ -633,3 +633,75 @@ body.far #links .bank { opacity: .5; transform: translate(10px, 8px); }
 body.far .composer-meta, body.river .composer-meta { color: var(--ink-2); }
 body.night .composer-meta { color: rgba(255,250,238,.85); }
 body.night .lily { background-color: #93a87c; background-image: var(--grain), radial-gradient(circle, rgba(60,80,40,.18) 1px, transparent 1.5px); }
+
+/* =================================================================
+   CONTRAST PASS: pronounced, letterpress-style text and deeper shadows
+   ================================================================= */
+:root {
+  --ink: #1a1714;
+  --ink-2: #3f3832;
+  --muted: #7d7366;
+  /* layered shadows: a tight contact shadow, then a long soft one */
+  --shadow: 0 1px 1px rgba(30,22,14,.14), 0 4px 8px -2px rgba(30,22,14,.18), 0 22px 44px -18px rgba(30,22,14,.5);
+  --shadow-deep: 0 1px 1px rgba(30,22,14,.16), 0 6px 12px -4px rgba(30,22,14,.22), 0 40px 80px -24px rgba(30,22,14,.62);
+}
+
+/* Text pressed into paper: darker ink, a touch more weight, a faint highlight below each letter */
+.doc-body { color: var(--ink); font-weight: 500; font-size: 19px; line-height: 1.76; text-shadow: 0 1px 0 rgba(255,255,255,.55); -webkit-font-smoothing: subpixel-antialiased; }
+.doc-body h1 { font-size: 43px; color: #120f0d; text-shadow: 0 0 .4px rgba(18,15,13,.6), 0 1px 0 rgba(255,255,255,.6); }
+.doc-body h2 { font-size: 24px; color: #120f0d; text-shadow: 0 0 .3px rgba(18,15,13,.5), 0 1px 0 rgba(255,255,255,.6); }
+.doc-body strong { font-weight: 700; color: #0f0d0b; }
+.doc-body em { color: var(--ink-2); }
+.doc-body blockquote { font-weight: 700; color: #1d1512; background-color: #efd2c9; box-shadow: 5px 4px 0 rgba(140,172,192,.85), 0 1px 2px rgba(30,22,14,.12); }
+.doc-body ul > li::before { opacity: 1; background: var(--shu); }
+.doc-head { color: var(--muted); }
+.doc-head .prompt { color: var(--ink-2); font-weight: 500; }
+.inscription { color: #6e6458; font-size: 20px; }
+#input { color: var(--ink); font-weight: 500; }
+.note-card .n { color: var(--ink); }
+.notes-empty { color: var(--ink-2); font-weight: 500; }
+
+/* Depth: the focused sheet lifts off the landscape; others sink back */
+.doc { box-shadow: var(--shadow); }
+.doc:not(.focused) { opacity: .5; filter: saturate(.7) brightness(.92); }
+.doc.focused { box-shadow: 18px 15px 0 var(--block), 18px 15px 24px -6px rgba(30,22,14,.35), var(--shadow-deep); }
+/* the top edge of the sheet catches the light, the bottom curls into shadow */
+.doc::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: 3px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.85), inset 0 -10px 18px -12px rgba(60,45,30,.18);
+}
+body.far .doc::after { display: none; }
+body.far .doc:not(.focused), body.overview .doc { filter: none; }
+
+/* Chrome: deeper, crisper shadows */
+#notes-panel, #drawer, #popover { box-shadow: var(--shadow-deep); }
+.composer-row { box-shadow: 7px 6px 0 rgba(140,172,192,.9), 0 1px 1px rgba(30,22,14,.15), 0 26px 48px -18px rgba(30,22,14,.6); }
+.composer-row:focus-within { box-shadow: 7px 6px 0 rgba(226,160,150,.95), 0 1px 1px rgba(30,22,14,.15), 0 26px 48px -18px rgba(30,22,14,.6); }
+#hud-top .pill, .status, .hud-btn, #constellation .track, .edge-nav { box-shadow: 0 1px 1px rgba(30,22,14,.16), 0 10px 22px -10px rgba(30,22,14,.55); }
+.note-card { box-shadow: 4px 3px 0 #e2a59b, 0 1px 2px rgba(30,22,14,.16), 0 8px 16px -10px rgba(30,22,14,.35); }
+.composer-meta { color: #2e2924; font-weight: 500; }
+
+/* Lily pads: richer green, firmer shadow, darker titles */
+.lily { background-color: #8fac6d; filter: drop-shadow(5px 5px 0 rgba(58,78,48,.7)) drop-shadow(0 12px 14px rgba(20,30,20,.35)); }
+.pad-title, .pad-name { color: #120f0d; text-shadow: 0 0 8px rgba(244,239,228,.7), 0 1px 0 rgba(255,255,255,.6); }
+#river-svg path.bank, #river-svg ellipse.bank, body.far #links .bank { opacity: .55; }
+.river-label { color: #2e2924; }
+/* Pad shadow: a darker green pass printed off-register beneath the leaf (the mask would clip a normal shadow) */
+.lily { filter: none; }
+.lilypad::before, .doc .pad::before {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  background: rgba(46, 64, 38, .62);
+  -webkit-mask: conic-gradient(from 118deg, transparent 0deg 26deg, #000 26deg 360deg);
+          mask: conic-gradient(from 118deg, transparent 0deg 26deg, #000 26deg 360deg);
+  transform: translate(7%, 6%) rotate(2deg);
+}
+.lilypad.ghost::before { display: none; }
+/* Pads stay round however long the title; titles shrink to fit the leaf */
+.doc .pad { height: calc(var(--doc-h) * 0.92); min-height: 0; }
+.pad-title {
+  font-size: min(calc(14px * var(--inv, 1)), calc(var(--doc-h) * 0.085));
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+.doc .pad { width: calc(var(--doc-w) * 0.9); height: calc(var(--doc-w) * 0.9); }
+.pad-title { font-size: min(calc(15px * var(--inv, 1)), calc(var(--doc-w) * 0.075)); }
+.pad-title { font-size: calc(var(--doc-w) * 0.105); max-width: 78%; }

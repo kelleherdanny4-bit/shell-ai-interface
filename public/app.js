@@ -152,7 +152,9 @@ function camForOverview() {
   const { docW, docH, vw, vh, topH, composerH, wide } = state.layout;
   if (!state.docs.length) return { x: 0, y: 0, s: 1, r: 0 };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const d of state.docs) {
+  // Frame the pads around where you are (up to five), so titles stay readable.
+  const f = Math.max(0, state.focus), lo = Math.max(0, Math.min(f - 2, state.docs.length - 5));
+  for (const d of state.docs.slice(lo, lo + 5)) {
     minX = Math.min(minX, d.pos.x - docW * 0.6); maxX = Math.max(maxX, d.pos.x + docW * 0.6);
     minY = Math.min(minY, d.pos.y - docH * 0.6); maxY = Math.max(maxY, d.pos.y + docH * 0.6);
   }
@@ -940,9 +942,11 @@ function landscape() {
     }
     const c = state.cam;
     const want = state.view === "river" || document.body.classList.contains("far") ? 1 : 0;
-    state.riverness += (want - state.riverness) * 0.05;
+    state.riverness += (want - state.riverness) * 0.09;
+    if (Math.abs(want - state.riverness) < 0.01) state.riverness = want;
 
     ctx.drawImage(sky, 0, 0);
+    if (state.riverness < 0.6) {
     // The sun: a flat disc, printed twice a little out of register.
     const sp = sunPos();
     const lift = Math.max(-1.6, Math.min(0.4, Math.log(c.s))) * H * 0.05;
@@ -950,10 +954,12 @@ function landscape() {
     ctx.beginPath(); ctx.arc(sp.x + 5 * dpr, sp.y - lift + 3 * dpr, sp.r, 0, 6.283); ctx.fill();
     ctx.fillStyle = rgb(scene.sun);
     ctx.beginPath(); ctx.arc(sp.x, sp.y - lift, sp.r, 0, 6.283); ctx.fill();
+    }
 
     // Hills: flat colour + woodgrain, each with a faint second pass offset.
     for (const L of LAYERS) {
-      const col = mix(scene.far, scene.near, L.i / 3);
+      // Nearer hills print darker, for depth and contrast.
+      const col = mix(mix(scene.far, scene.near, L.i / 3), scene.ink, L.i * 0.07);
       hill(L, 6, -4 * dpr, c);
       ctx.fillStyle = rgb(mix(col, scene.ink, 0.25), 0.35);
       ctx.fill();
@@ -982,6 +988,13 @@ function landscape() {
       ctx.fillRect(0, 0, W, H);
       ctx.restore();
     }
+
+    // A soft vignette: the edges fall into shadow so the paper sheets stand out.
+    const vg = ctx.createRadialGradient(W * 0.42, H * 0.48, Math.min(W, H) * 0.25, W * 0.5, H * 0.5, Math.max(W, H) * 0.78);
+    vg.addColorStop(0, "rgba(30,24,18,0)");
+    vg.addColorStop(1, `rgba(30,24,18,${0.34 + scene.dens * 0.15})`);
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
 
     // Paper fibres over the whole print
     ctx.save();
