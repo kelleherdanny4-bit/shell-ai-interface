@@ -11,21 +11,15 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10' fill='none' stroke='%23cf4f36' stroke-width='3'/><circle cx='16' cy='16' r='4' fill='%23cf4f36'/></svg>" />
 </head>
 <body>
-  <canvas id="stars" aria-hidden="true"></canvas>
+  <canvas id="ground" aria-hidden="true"></canvas>
 
   <!-- The canvas world. Documents live here; the camera flies between them. -->
   <div id="viewport">
     <div id="world">
       <svg id="links" aria-hidden="true"></svg>
       <div id="docs"></div>
-    </div>
-  </div>
-
-  <!-- The river: every project as a lily pad -->
-  <div id="river" aria-label="All projects">
-    <div id="river-world">
-      <svg id="river-svg" aria-hidden="true"></svg>
-      <div id="pads"></div>
+      <!-- Zoomed all the way out: every project is a cloud in one sky -->
+      <div id="sky" aria-label="All projects"></div>
     </div>
   </div>
 
@@ -99,7 +93,7 @@
       </button>
       <button id="btn-send" title="Send (Enter)">Send</button>
     </div>
-    <div class="composer-meta" id="composer-meta">Enter to send · ← → drift between docs · O to zoom out · P for all projects</div>
+    <div class="composer-meta" id="composer-meta">Enter to send · ← → drift between docs · O to rise · P for the sky</div>
   </footer>
 
   <!-- Threads drawer -->
@@ -107,7 +101,7 @@
   <aside id="drawer" aria-label="Threads">
     <div class="panel-head"><span class="label">Threads</span><button class="panel-close" id="drawer-close" aria-label="Close">×</button></div>
     <button id="drawer-new" class="drawer-new">+ New thread</button>
-    <button id="drawer-river" class="drawer-river">See all projects on the river</button>
+    <button id="drawer-river" class="drawer-river">Rise into the sky of all projects</button>
     <div id="thread-list"></div>
   </aside>
 

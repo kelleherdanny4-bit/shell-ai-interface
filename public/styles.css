@@ -44,7 +44,7 @@ kbd {
 }
 
 /* ---------- landscape ---------- */
-#stars { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
+#ground { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
 body::after { /* soft paper grain over everything */
   content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 1; opacity: .35; mix-blend-mode: soft-light;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
@@ -56,7 +56,6 @@ body::after { /* soft paper grain over everything */
 #world.flying { will-change: transform; }
 #links { position: absolute; left: -20000px; top: -20000px; width: 40000px; height: 40000px; overflow: visible; pointer-events: none; }
 #links path.trail { fill: none; stroke: #fffaf0; stroke-opacity: 0.55; stroke-width: 3; stroke-dasharray: 1 16; stroke-linecap: round; animation: flow 6s linear infinite; }
-#links .halo { fill: url(#halo); }
 @keyframes flow { to { stroke-dashoffset: -34; } }
 
 /* ---------- documents: paper ---------- */
@@ -340,92 +339,6 @@ body.listening #orb .core { background: radial-gradient(circle at 38% 35%, #ffe9
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 
-/* =================================================================
-   Lily pads, water and the river of projects
-   ================================================================= */
-:root { --water-a: #8db8bb; --water-b: #6f9ea6; --bank: #4f6f48; }
-
-/* A lily pad: round leaf, a notch, faint veins, a slow bob */
-.lily {
-  position: absolute; inset: 0; border-radius: 50%;
-  background:
-    repeating-conic-gradient(from 0deg, rgba(255,255,240,.10) 0deg 1.2deg, transparent 1.2deg 24deg),
-    radial-gradient(circle at 38% 32%, #b4d39c 0%, #7fab68 38%, #5b8a4c 75%, #4a7640 100%);
-  -webkit-mask: conic-gradient(from 118deg, transparent 0deg 26deg, #000 26deg 360deg);
-          mask: conic-gradient(from 118deg, transparent 0deg 26deg, #000 26deg 360deg);
-  box-shadow: inset 0 -8px 18px rgba(20,50,20,.25);
-  filter: drop-shadow(0 10px 14px rgba(10,40,40,.35));
-  animation: bob 9s ease-in-out infinite alternate; animation-delay: calc(var(--d, 0s) * -1);
-}
-@keyframes bob { from { transform: rotate(-4deg) translateY(-3px); } to { transform: rotate(5deg) translateY(4px); } }
-body.night .lily { background:
-    repeating-conic-gradient(from 0deg, rgba(255,255,240,.06) 0deg 1.2deg, transparent 1.2deg 24deg),
-    radial-gradient(circle at 38% 32%, #7e9e72 0%, #56794b 45%, #3b5a35 100%); }
-/* A lotus blooms on pads with recent activity */
-.bloom::after {
-  content: ""; position: absolute; right: 12%; top: 10%; width: 22%; aspect-ratio: 1; border-radius: 50%; pointer-events: none;
-  background:
-    radial-gradient(circle, #ffe9a8 0 18%, transparent 19%),
-    conic-gradient(from 0deg, #f7c6d0, #fbe1e6, #f2aebd, #fbe1e6, #f7c6d0, #fbe1e6, #f2aebd, #fbe1e6, #f7c6d0);
-  -webkit-mask: radial-gradient(circle, #000 55%, transparent 72%); mask: radial-gradient(circle, #000 55%, transparent 72%);
-  filter: drop-shadow(0 3px 5px rgba(120,40,60,.3));
-}
-
-/* ---- docs become pads when zoomed out ---- */
-.doc > .doc-head, .doc > .doc-scroll { transition: opacity .6s var(--ease); }
-.doc { transition: opacity .9s var(--ease), box-shadow .6s var(--ease), background-color .6s var(--ease); }
-.doc .pad {
-  position: absolute; left: 50%; top: 50%; width: calc(var(--doc-h) * 0.92); aspect-ratio: 1;
-  transform: translate(-50%, -50%) scale(.5); opacity: 0; pointer-events: none;
-  transition: opacity .7s var(--ease), transform 1s var(--ease);
-  display: grid; place-items: center;
-}
-body.far .doc { background-color: transparent; box-shadow: none; opacity: 1; }
-body.far .doc > .doc-head, body.far .doc > .doc-scroll { opacity: 0; pointer-events: none; }
-body.far .doc .pad { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-body.far .doc:hover .pad { transform: translate(-50%, -50%) scale(1.04); }
-.pad-title, .pad-name {
-  position: relative; font-family: var(--font-head); color: #fffdf4; text-align: center; line-height: 1.12;
-  text-shadow: 0 1px 2px rgba(20,40,20,.5), 0 2px 16px rgba(20,40,20,.45); font-variation-settings: "SOFT" 100;
-}
-.pad-title { font-size: calc(19px * var(--inv, 1)); max-width: 74%; font-weight: 500; }
-body.far #links .trail { opacity: 0; }
-
-/* Water, shared by the thread view and the river view */
-#links .bank, #river-svg .bank { fill: none; stroke: var(--bank); stroke-linecap: round; stroke-linejoin: round; opacity: .35; filter: blur(14px); }
-#links .water, #river-svg .water { fill: none; stroke: var(--water-a); stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
-#links .shimmer, #river-svg .shimmer { fill: none; stroke: #fffbe8; stroke-opacity: .35; stroke-width: 3; stroke-dasharray: 3 46; stroke-linecap: round; animation: flow 9s linear infinite; }
-#links .bank, #links .water, #links .shimmer { opacity: 0; transition: opacity 1s var(--ease); }
-body.far #links .bank { opacity: .35; } body.far #links .water { opacity: .9; } body.far #links .shimmer { opacity: 1; stroke-width: 8; stroke-dasharray: 6 140; }
-#river-svg ellipse.water { fill: var(--water-b); stroke: none; }
-#river-svg ellipse.bank { fill: var(--bank); stroke: none; }
-#river-svg ellipse.shimmer { fill: none; stroke-dasharray: 2 34; }
-#river-svg path.water { stroke-width: 150; }
-#river-svg path.bank { stroke-width: 230; }
-#river-svg path.shimmer.two { stroke-dasharray: 1 70; stroke-dashoffset: 30; animation-duration: 13s; stroke-width: 2; }
-
-/* ---- the river view ---- */
-#river { position: fixed; inset: 0; z-index: 3; opacity: 0; pointer-events: none; transition: opacity 1.1s var(--ease); overflow: hidden; }
-body.river #river { opacity: 1; pointer-events: auto; }
-#river-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-#river-svg { position: absolute; left: 0; top: 0; overflow: visible; }
-#pads { position: absolute; inset: 0; }
-.lilypad { position: absolute; border: 0; padding: 0; background: none; display: grid; place-items: center; cursor: pointer; transition: transform .6s var(--ease); }
-.lilypad:hover { transform: scale(1.06); }
-.lilypad .pad-name { font-size: calc(22px / var(--rs, 1)); font-weight: 500; max-width: 140%; white-space: nowrap; }
-.lilypad .pad-meta { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; text-align: center; top: calc(50% + 0.95em * 1); font-size: calc(12.5px / var(--rs, 1)); color: #fffdf4; opacity: 0; transition: opacity .4s; text-shadow: 0 1px 8px rgba(20,40,20,.6); font-weight: 700; letter-spacing: .03em; margin-top: calc(14px / var(--rs, 1)); }
-.lilypad:hover .pad-meta, .lilypad:focus-visible .pad-meta, .lilypad.ghost .pad-meta { opacity: .9; }
-.lilypad.here .lily { box-shadow: inset 0 -8px 18px rgba(20,50,20,.25), 0 0 0 calc(4px / var(--rs, 1)) rgba(255,250,230,.55); }
-.lilypad.ghost { cursor: default; }
-.lilypad.ghost .lily { background: none; border: calc(2px / var(--rs, 1)) dashed rgba(255,253,244,.55); filter: none; -webkit-mask: none; mask: none; animation: none; }
-.lilypad.ghost .pad-name { opacity: .85; font-style: italic; }
-.river-label { position: absolute; font-family: var(--font-head); font-style: italic; font-size: calc(26px / var(--rs, 1)); color: rgba(255,253,244,.92); text-shadow: 0 2px 14px rgba(20,40,20,.45); white-space: nowrap; font-variation-settings: "SOFT" 100; }
-
-body.river #viewport { opacity: 0; pointer-events: none; transition: opacity .9s var(--ease); }
-#viewport { transition: opacity .9s var(--ease); }
-body.river #composer, body.river #notes-panel, body.river .edge-nav, body.river #constellation, body.river #btn-new, body.river #btn-overview, body.river .crumbs { opacity: 0; pointer-events: none; }
-#composer, #notes-panel, .edge-nav, #constellation, #btn-new, #btn-overview, .crumbs { transition: opacity .7s var(--ease); }
-
 /* ---- header crumbs ---- */
 .brand { border: 0; background: none; padding: 0; cursor: pointer; }
 .brand:hover { color: var(--moss-deep); }
@@ -442,7 +355,7 @@ body.river #composer, body.river #notes-panel, body.river .edge-nav, body.river 
 
 @media (max-width: 760px) { .crumbs { display: none; } }
 
-body.river .crumbs { display: none; }
+body.sky .crumbs { display: none; }
 
 /* =================================================================
    PRINT EDITION
@@ -581,7 +494,7 @@ kbd { border-radius: 2px; background: var(--paper-2); color: var(--ink); border-
 #btn-send { border-radius: 2px; font-family: var(--font-head); font-weight: 800; letter-spacing: .12em; }
 #btn-mic { border-radius: 2px; }
 .composer-meta { font-family: var(--font-body); color: var(--ink-2); text-shadow: none; }
-body.night .composer-meta, body.far .composer-meta, body.river .composer-meta { color: rgba(255,250,238,.85); }
+body.night .composer-meta, body.far .composer-meta, body.sky .composer-meta { color: rgba(255,250,238,.85); }
 #attach-chip { border-radius: 2px; background: var(--sakura); color: #4a201a; box-shadow: 3px 3px 0 var(--sora); }
 #attach-clear { border-radius: 2px; }
 /* the orb becomes a red seal that stamps while Claude works */
@@ -594,45 +507,6 @@ body.busy #orb .core { animation: stamp 1.6s ease-in-out infinite; }
 .drawer-new { border-radius: 2px; border-color: var(--shu); color: var(--shu-deep); }
 .thread-item { border-radius: 2px; } .thread-item.on { background: var(--paper-2); box-shadow: inset 3px 0 0 var(--shu); }
 #toast { border-radius: 3px; }
-
-/* ---- lily pads, printed: flat green, woodgrain, a second pass off-register ---- */
-.lily {
-  background-color: #9db57e;
-  background-image: var(--grain), radial-gradient(circle, rgba(60,80,40,.18) 1px, transparent 1.5px);
-  background-size: 300px 300px, 7px 7px;
-  background-blend-mode: multiply, normal;
-  box-shadow: none;
-  filter: drop-shadow(5px 4px 0 rgba(85,107,74,.55));
-}
-body.night .lily { background-color: #8fa37a; }
-.pad-title, .pad-name { font-family: var(--font-head); font-weight: 800; color: var(--ink); text-shadow: 0 0 10px rgba(244,239,228,.55), 0 0 2px rgba(244,239,228,.8); }
-.lilypad.here .lily { box-shadow: none; filter: drop-shadow(5px 4px 0 var(--shu)); }
-.lilypad .pad-meta { font-family: var(--font-pencil); font-size: calc(19px / var(--rs, 1)); font-weight: 500; color: var(--ink-2); letter-spacing: 0; text-shadow: none; }
-.lilypad.ghost .lily { border-color: rgba(38,34,30,.45); filter: none; background: none; }
-.lilypad.ghost .pad-name { color: var(--ink-2); font-weight: 600; text-shadow: none; }
-.bloom::after { border-radius: 50%; background: var(--sakura); box-shadow: 3px 2px 0 var(--shu); -webkit-mask: none; mask: none; filter: none; width: 16%; right: 16%; top: 14%; }
-.river-label { font-family: var(--font-pencil); font-style: normal; font-size: calc(34px / var(--rs, 1)); color: var(--ink-2); text-shadow: none; }
-body.night .river-label { color: #f4efe4; }
-
-/* water: flat blue, printed with the grain of the block */
-#links .bank, #river-svg .bank { filter: none; stroke: var(--bank); opacity: .55; }
-#river-svg path.bank { stroke-width: 165; transform: translate(9px, 7px); }
-#river-svg ellipse.bank { transform: translate(10px, 8px); opacity: .5; }
-#links .water, #river-svg .water { opacity: 1; }
-#river-svg .grainline { fill: none; stroke: url(#grainpat); stroke-width: 150; stroke-linecap: round; stroke-linejoin: round; mix-blend-mode: multiply; opacity: .7; }
-#river-svg .grainfill { fill: url(#grainpat); mix-blend-mode: multiply; opacity: .7; }
-#links .shimmer, #river-svg .shimmer { stroke: #fbf6ea; stroke-opacity: .7; stroke-linecap: butt; }
-body.far #links .bank { opacity: .5; transform: translate(10px, 8px); }
-
-/* print edition: final tuning */
-.pad-title { font-size: calc(14px * var(--inv, 1)); max-width: 80%; line-height: 1.25; }
-#links .bank, #river-svg .bank { stroke: rgba(98, 128, 150, 1); }
-#river-svg ellipse.bank { fill: rgba(98, 128, 150, 1); }
-#river-svg path.bank, #river-svg ellipse.bank, body.far #links .bank { opacity: .35; }
-.doc-body blockquote { background-image: radial-gradient(circle, rgba(207,79,54,.14) 0.9px, transparent 1.4px); background-size: 6px 6px; }
-body.far .composer-meta, body.river .composer-meta { color: var(--ink-2); }
-body.night .composer-meta { color: rgba(255,250,238,.85); }
-body.night .lily { background-color: #93a87c; background-image: var(--grain), radial-gradient(circle, rgba(60,80,40,.18) 1px, transparent 1.5px); }
 
 /* =================================================================
    CONTRAST PASS: pronounced, letterpress-style text and deeper shadows
@@ -681,31 +555,6 @@ body.far .doc:not(.focused), body.overview .doc { filter: none; }
 .note-card { box-shadow: 4px 3px 0 #e2a59b, 0 1px 2px rgba(30,22,14,.16), 0 8px 16px -10px rgba(30,22,14,.35); }
 .composer-meta { color: #2e2924; font-weight: 500; }
 
-/* Lily pads: richer green, firmer shadow, darker titles */
-.lily { background-color: #8fac6d; filter: drop-shadow(5px 5px 0 rgba(58,78,48,.7)) drop-shadow(0 12px 14px rgba(20,30,20,.35)); }
-.pad-title, .pad-name { color: #120f0d; text-shadow: 0 0 8px rgba(244,239,228,.7), 0 1px 0 rgba(255,255,255,.6); }
-#river-svg path.bank, #river-svg ellipse.bank, body.far #links .bank { opacity: .55; }
-.river-label { color: #2e2924; }
-/* Pad shadow: a darker green pass printed off-register beneath the leaf (the mask would clip a normal shadow) */
-.lily { filter: none; }
-.lilypad::before, .doc .pad::before {
-  content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
-  background: rgba(46, 64, 38, .62);
-  -webkit-mask: conic-gradient(from 118deg, transparent 0deg 26deg, #000 26deg 360deg);
-          mask: conic-gradient(from 118deg, transparent 0deg 26deg, #000 26deg 360deg);
-  transform: translate(7%, 6%) rotate(2deg);
-}
-.lilypad.ghost::before { display: none; }
-/* Pads stay round however long the title; titles shrink to fit the leaf */
-.doc .pad { height: calc(var(--doc-h) * 0.92); min-height: 0; }
-.pad-title {
-  font-size: min(calc(14px * var(--inv, 1)), calc(var(--doc-h) * 0.085));
-  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
-}
-.doc .pad { width: calc(var(--doc-w) * 0.9); height: calc(var(--doc-w) * 0.9); }
-.pad-title { font-size: min(calc(15px * var(--inv, 1)), calc(var(--doc-w) * 0.075)); }
-.pad-title { font-size: calc(var(--doc-w) * 0.105); max-width: 78%; }
-
 /* =================================================================
    QUIET EDITION (doc view)
    One sheet on a lot of bare paper. Three colours only: paper, graphite,
@@ -741,8 +590,6 @@ body:not(.far) #world.flying .doc.focused {
     calc(var(--sx) * 54px) calc(var(--sy) * 68px) 80px -10px rgb(var(--shade) / calc(var(--sa) * .20)),
     calc(var(--sx) * 150px) calc(var(--sy) * 190px) 200px -24px rgb(var(--shade) / calc(var(--sa) * .26));
 }
-/* no water behind the sheet: the river only appears once you zoom out */
-body:not(.far) #links .bank, body:not(.far) #links .water, body:not(.far) #links .shimmer { opacity: 0; }
 /* the pencil line that joins one doc to the next */
 #links path.trail { stroke: var(--ink); stroke-opacity: .3; stroke-width: 1.2; stroke-dasharray: 2 10; animation: none; }
 
@@ -801,7 +648,7 @@ body.wide #notes-panel { display: none; }
 .edge-nav.right { right: 18px; }
 #hud-top, .edge-nav, .composer-meta { transition: opacity .9s var(--ease); }
 body.idle #hud-top:not(:focus-within), body.idle .edge-nav:not(:focus-visible), body.idle .composer-meta { opacity: 0; }
-body.idle.river #hud-top, body.idle.far #hud-top { opacity: 1; }
+body.idle.sky #hud-top, body.idle.far #hud-top { opacity: 1; }
 
 /* ---- the composer: one ruled line at the foot of the sheet ---- */
 #composer, body.wide #composer { left: var(--cx, 50%); width: min(var(--doc-w, 820px), calc(100vw - 32px)); }
@@ -818,7 +665,7 @@ body.has-notes #input ~ #btn-send { opacity: 1; color: var(--shu); }
 body.night #attach-chip { color: var(--ink); }
 #btn-send[disabled] { opacity: .2; }
 .composer-meta { color: var(--ink-2); opacity: .75; }
-body.night .composer-meta, body.night.far .composer-meta, body.night.river .composer-meta { color: var(--ink); }
+body.night .composer-meta, body.night.far .composer-meta, body.night.sky .composer-meta { color: var(--ink); }
 /* "3 notes ready to send": pencilled above the line, not a chip */
 #attach-chip { background: none; box-shadow: none; padding: 0; font-family: var(--font-pencil); font-size: 22px; font-weight: 500; color: #453e36; }
 #attach-chip .attach-count { color: var(--shu); font-weight: 500; }
@@ -835,4 +682,87 @@ body.wide #attach-chip { cursor: default; }
   .doc-head { padding: 14px 24px 8px; }
   .doc-scroll { padding: 12px 24px 48px; }
   .doc-body blockquote { font-size: 19px; padding-left: 18px; }
+}
+
+/* =================================================================
+   SKY
+   Zoomed out, a pale blue sky is printed over the paper in halftone
+   (drawn on #ground in app.js). Clouds are the paper left unprinted, so
+   every label here sits on bare paper. Four colours: paper, graphite,
+   one red, one sky blue.
+   ================================================================= */
+
+/* ---- docs become clouds: the sheet dissolves, its title stays ---- */
+.doc > .doc-head, .doc > .doc-scroll { transition: opacity .6s var(--ease); }
+.doc { transition: opacity .9s var(--ease), box-shadow 1.2s var(--ease), background-color .7s var(--ease); }
+body.far .doc { background-color: transparent; background-image: none; box-shadow: none !important; opacity: 1; cursor: zoom-in; }
+body.far .doc > .doc-head, body.far .doc > .doc-scroll { opacity: 0 !important; pointer-events: none; }
+.doc .pad {
+  position: absolute; left: 50%; top: 50%; width: calc(var(--doc-w) * 0.86);
+  display: grid; justify-items: center; gap: calc(6px * var(--inv, 1));
+  transform: translate(-50%, -50%) rotate(calc(-1 * var(--rot, 0deg))) scale(.92);
+  opacity: 0; pointer-events: none; text-align: center;
+  transition: opacity .8s var(--ease), transform 1.1s var(--ease);
+}
+body.far .doc .pad { opacity: 1; transform: translate(-50%, -50%) rotate(calc(-1 * var(--rot, 0deg))); }
+.pad-title {
+  font-family: var(--font-head); font-weight: 700; color: var(--ink); line-height: 1.22; letter-spacing: .01em;
+  font-size: min(calc(17px * var(--inv, 1)), calc(var(--doc-w) * 0.075));
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; text-wrap: balance;
+}
+.pad-meta { font-family: var(--font-pencil); color: #5d554b; font-size: min(calc(17px * var(--inv, 1)), calc(var(--doc-w) * 0.06)); }
+.pad-meta:empty { display: none; }
+body.far .doc:hover .pad-title { text-decoration: underline; text-decoration-thickness: calc(1px * var(--inv, 1)); text-underline-offset: .25em; text-decoration-color: var(--shu); }
+body.far .doc.focused .pad-title::before {
+  content: ""; display: inline-block; width: .32em; height: .32em; border-radius: 50%; background: var(--shu); margin-right: .4em; vertical-align: .14em;
+}
+#links path.trail { transition: stroke-opacity 1s var(--ease); }
+body.far #links path.trail { stroke-opacity: .22; stroke-width: calc(1.2px * var(--inv, 1)); stroke-dasharray: calc(2px * var(--inv, 1)) calc(12px * var(--inv, 1)); }
+
+/* ---- the sky of projects ---- */
+#sky { position: absolute; left: 0; top: 0; pointer-events: none; }
+.sky-cloud {
+  position: absolute; border: 0; padding: 0; background: none; border-radius: 50%;
+  display: grid; place-content: center; justify-items: center; gap: calc(4px * var(--inv, 1)); text-align: center;
+  cursor: pointer; pointer-events: none; outline: none;
+}
+body.high .sky-cloud:not(.ghost) { pointer-events: auto; }
+.sky-cloud .name {
+  font-family: var(--font-head); font-weight: 700; color: var(--ink); white-space: nowrap; letter-spacing: .03em;
+  font-size: calc(25px * var(--inv, 1)); line-height: 1.1; display: flex; align-items: center; gap: .38em;
+}
+.sky-cloud .meta { font-family: var(--font-pencil); color: #5d554b; font-size: calc(20px * var(--inv, 1)); white-space: nowrap; }
+.sky-cloud.here .name::before { content: ""; width: .3em; height: .3em; border-radius: 50%; background: var(--shu); flex: none; }
+.sky-cloud:hover .name, .sky-cloud:focus-visible .name { text-decoration: underline; text-decoration-color: var(--shu); text-decoration-thickness: calc(1.5px * var(--inv, 1)); text-underline-offset: .22em; }
+.sky-cloud.ghost { cursor: default; }
+.sky-cloud.ghost .name { font-weight: 500; color: var(--ink-2); font-style: italic; }
+.sky-word {
+  position: absolute; white-space: nowrap; font-family: var(--font-pencil); color: var(--ink);
+  font-size: calc(30px * var(--inv, 1)); transform: rotate(-2deg); transform-origin: 0 50%; opacity: .78;
+}
+body.night .sky-word { color: #f4efe4; opacity: .85; }
+
+/* ---- what the chrome does up in the sky ---- */
+body.sky #composer, body.sky #notes-panel, body.sky .edge-nav, body.sky #constellation, body.sky #btn-new, body.sky #btn-overview { opacity: 0; pointer-events: none; }
+#composer, #notes-panel, .edge-nav, #constellation, #btn-new, #btn-overview, .crumbs { transition: opacity .7s var(--ease); }
+body.idle.sky #hud-top { opacity: 1; }
+body.night.sky #hud-top .brand, body.night.sky .status { color: #f4efe4; }
+body.night.sky .hud-btn svg { stroke: #f4efe4; }
+body.far:not(.sky) .composer-meta { opacity: 0; }
+
+/* ---- at night, chrome over the deep blue is printed in paper white ---- */
+body.night.far .brand, body.night.far .crumb-project, body.night.far .thread-title, body.night.far .status,
+body.night.far #input, body.night.far #btn-send, body.night.far .composer-meta, body.night.far #attach-chip { color: #f1ece2; }
+body.night.far .crumb-project:not(:empty)::after { color: rgb(241 236 226 / .6); }
+body.night.far .hud-btn svg, body.night.far .edge-nav svg { stroke: #f1ece2; }
+body.night.far .hud-btn.active { background: #f1ece2; } body.night.far .hud-btn.active svg { stroke: var(--ink); }
+body.night.far #input::placeholder { color: rgb(241 236 226 / .55); }
+body.night.far .composer-row { border-bottom-color: rgb(241 236 226 / .45); }
+body.night.far .status .dot { box-shadow: inset 0 0 0 1.5px #f1ece2; }
+body.night.far #constellation button span { background: rgb(241 236 226 / .55); }
+body.night.far #constellation button.on span { background: var(--shu); }
+@media (max-width: 760px) {
+  .sky-cloud .name { font-size: calc(20px * var(--inv, 1)); }
+  .sky-cloud .meta { font-size: calc(17px * var(--inv, 1)); }
+  .sky-word { font-size: calc(24px * var(--inv, 1)); }
 }

@@ -22,10 +22,9 @@ const state = {
   overview: false,
   busy: false,
   notes: [], // pending notes for this thread
-  view: "thread", // "thread" (docs) or "river" (all projects)
+  view: "thread", // "thread" (docs) or "sky" (all projects)
   projects: [],
   projectId: null,
-  riverPads: {},
   cam: { x: 0, y: 0, s: 1, r: 0 },
   layout: { docW: 820, docH: 600, cx: 0, cy: 0, wide: true },
 };
@@ -74,10 +73,13 @@ function placeDocs() {
     d.el.style.left = p.x - docW / 2 + "px";
     d.el.style.top = p.y - docH / 2 + "px";
     d.el.style.transform = `rotate(${p.r}deg)`;
+    d.el.style.setProperty("--rot", p.r + "deg");
   });
   drawLinks();
+  buildSky();
 }
 
+// A pencil line joins one doc to the next.
 function drawLinks() {
   const O = 20000;
   const pts = state.docs.map((d) => [d.pos.x + O, d.pos.y + O]);
@@ -90,12 +92,7 @@ function drawLinks() {
       path += ` C${mx},${py} ${mx},${y} ${x},${y}`;
     }
   });
-  // When zoomed out, a river runs under the lily pads; it flows in and out of frame.
-  const sp = state.layout.docW * 1.6;
-  const [fx, fy] = pts[0] || [O, O], [lx, ly] = pts[pts.length - 1] || [O, O];
-  const river = `M${fx - sp},${fy + sp * 0.2} C${fx - sp / 2},${fy + sp * 0.2} ${fx - sp / 2},${fy} ${fx},${fy}` + path.replace(/^M[^ C]+/, "") + ` C${lx + sp / 2},${ly} ${lx + sp / 2},${ly - sp * 0.2} ${lx + sp},${ly - sp * 0.2}`;
-  const w = state.layout.docH * 0.55;
-  linksEl.innerHTML = `<path class="bank" d="${river}" stroke-width="${w * 1.35}" /><path class="water" d="${river}" stroke-width="${w}" /><path class="shimmer" d="${river}" /><path class="trail" d="${path}" />`;
+  linksEl.innerHTML = `<path class="trail" d="${path}" />`;
 }
 
 // ---------------------------------------------------------------- camera
@@ -104,9 +101,17 @@ function applyCam() {
   const { cx, cy } = state.layout;
   const c = state.cam;
   world.style.transform = `translate(${cx}px,${cy}px) scale(${c.s}) rotate(${-c.r}deg) translate(${-c.x}px,${-c.y}px)`;
-  // Semantic zoom: far away, docs turn into lily pads that show only a title.
+  // Semantic zoom: far away, docs turn into clouds that show only a title;
+  // further still they melt into the sky and the projects' clouds come out.
   document.body.classList.toggle("far", c.s < 0.5 && !state.holdNear);
-  world.style.setProperty("--inv", (1 / c.s).toFixed(3));
+  world.style.setProperty("--inv", (1 / c.s).toFixed(4));
+  const lw = levelW(c.s);
+  const dv = smooth(0.35, 0.85, lw), sv = 1 - smooth(0.12, 0.55, lw);
+  docsEl.style.opacity = linksEl.style.opacity = dv.toFixed(3);
+  docsEl.style.visibility = dv < 0.01 ? "hidden" : "";
+  skyEl.style.opacity = sv.toFixed(3);
+  skyEl.style.visibility = sv < 0.01 ? "hidden" : "";
+  document.body.classList.toggle("high", lw < 0.5);
 }
 
 const ease = (t) => t * t * t * (t * (6 * t - 15) + 10); // smootherstep: unhurried
@@ -169,6 +174,7 @@ function camForOverview() {
 
 async function focusDoc(i, opts = {}) {
   if (i < 0 || i >= state.docs.length) return;
+  setView("thread");
   state.overview = false;
   document.body.classList.remove("overview");
   $("#btn-overview").classList.remove("active");
@@ -181,21 +187,23 @@ async function focusDoc(i, opts = {}) {
   if (state.focus === i) positionMarginalia(state.docs[i]);
 }
 
-// O zooms out one level: doc → lily pads → the river of projects.
+// O zooms out one level: doc → the thread's clouds → the sky of projects.
 function zoomOut() {
-  if (state.view === "river") return;
-  if (state.overview) return showRiver();
+  if (state.view === "sky") return;
+  if (state.overview) return showSky();
   toggleOverview(true);
 }
 
 function toggleOverview(on = !state.overview) {
   if (!state.docs.length) return;
   if (!on) return focusDoc(Math.max(0, state.focus));
+  setView("thread");
   state.overview = true;
   document.body.classList.add("overview");
   $("#btn-overview").classList.add("active");
   hidePopover();
-  flyTo(camForOverview(), { dip: false, duration: 1100 });
+  updateNav();
+  flyTo(camForOverview(), { dip: false, duration: reduceMotion ? 1 : 1500 });
 }
 
 // ---------------------------------------------------------------- docs
@@ -226,7 +234,7 @@ function makeDoc(d) {
     <div class="doc-scroll"><div class="doc-body"></div></div>
     <div class="inscription"><span class="date"></span><span class="ed"></span></div>
     <aside class="marginalia" aria-label="Your notes on this doc"></aside>
-    <div class="pad" aria-hidden="true"><span class="lily"></span><span class="pad-title"></span></div>`;
+    <div class="pad" aria-hidden="true"><span class="pad-title"></span><span class="pad-meta"></span></div>`;
   d.el = el;
   d.marginEl = $(".marginalia", el);
   setPadTitle(d);
@@ -245,6 +253,7 @@ function makeDoc(d) {
 
 function setPadTitle(d) {
   $(".pad-title", d.el).textContent = d.title && d.title !== "…" ? d.title : "Writing…";
+  $(".pad-meta", d.el).textContent = d.streaming ? "" : fmtTime(d.at);
 }
 
 // Like a print's pencilled margin: the date, and its place in the series.
@@ -715,7 +724,7 @@ const WELCOME = `# Welcome to Shell
 ## Moving around
 
 - **← →** fly between docs in this thread.
-- **O** zooms out. Docs turn into lily pads. Press **O** again to see all your projects on the river.
+- **O** zooms out. Docs turn into clouds. Press **O** again to rise into the sky, where every project is a cloud.
 - **T** opens this project's threads. **N** starts a new one.
 
 ## Try it now
@@ -728,7 +737,9 @@ async function api(path, opts) {
   return r.json();
 }
 
-async function openThread(id, { intro = true } = {}) {
+// from: "sky" when diving down out of a project's cloud, "boot" on first load,
+// otherwise a short glide in from just above the thread.
+async function openThread(id, { from = "near" } = {}) {
   const t = await api(`/api/threads/${id}`);
   state.thread = t;
   state.projectId = t.projectId;
@@ -745,27 +756,38 @@ async function openThread(id, { intro = true } = {}) {
   if (!state.docs.length) {
     state.docs.push(makeDoc({ id: "welcome", text: WELCOME, title: "Welcome to Shell", local: true, at: Date.now() }));
   }
-  for (const d of state.docs) { renderBody(d, { animate: false }); addGutters(d); }
+  for (const d of state.docs) { renderBody(d, { animate: false }); addGutters(d); setPadTitle(d); }
   renumber();
   placeDocs();
   loadNotes();
   renderNotes();
   closeDrawer();
   const last = state.docs.length - 1;
-  if (intro) {
-    // Start far out, then dive into the latest doc.
-    const o = camForOverview();
-    Object.assign(state.cam, { ...o, s: o.s * 0.25, r: -25 });
+  if (from === "boot" && SKY.g) {
+    // Open on the sky, hold a breath, then sink into this project's cloud.
+    Object.assign(state.cam, camForSky());
+    setView("sky");
     applyCam();
-    await focusDoc(last, { duration: reduceMotion ? 1 : 2000 });
-  } else focusDoc(last);
-  if (!matchMedia("(pointer: coarse)").matches) input.focus({ preventScroll: true });
+    await new Promise((r) => setTimeout(r, reduceMotion ? 0 : 1300));
+    await focusDoc(last, { duration: reduceMotion ? 1 : 3000, dip: false });
+  } else if (from === "sky" && SKY.g) {
+    // The camera was over this project's cloud; the cloud now sits on the latest doc.
+    Object.assign(state.cam, { x: SKY.origin.x, y: SKY.origin.y, r: 0 });
+    applyCam();
+    await focusDoc(last, { duration: reduceMotion ? 1 : 2600, dip: false });
+  } else {
+    const o = camForOverview();
+    Object.assign(state.cam, { ...o, s: o.s * 0.6, r: -6 });
+    applyCam();
+    await focusDoc(last, { duration: reduceMotion ? 1 : 1900, dip: false });
+  }
   if (innerWidth <= 760) input.placeholder = "Ask anything";
 }
 
-async function newThread(projectId = state.projectId) {
+async function newThread(projectId = state.projectId, opts) {
   const t = await api("/api/threads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId }) });
-  await openThread(t.id);
+  await openThread(t.id, opts);
+  loadProjects().catch(() => {});
 }
 
 const projectName = (id) => state.projects.find((p) => p.id === id)?.name || "";
@@ -870,18 +892,18 @@ function makeGrain(size = 512, seed = 11) {
   return c;
 }
 
-function makeWashi(size = 384, seed = 7) {
+function makeWashi(size = 512, seed = 7) {
   const c = document.createElement("canvas");
   c.width = c.height = size;
   const g = c.getContext("2d");
   const r = rnd(seed);
   // Speckle
-  for (let i = 0; i < 2600; i++) {
+  for (let i = 0; i < 4600; i++) {
     g.fillStyle = r() < 0.5 ? `rgba(120,100,70,${r() * 0.07})` : `rgba(255,255,250,${r() * 0.25})`;
     g.fillRect(r() * size, r() * size, 1, 1);
   }
   // Fibres: short curls, some light, some a touch darker
-  for (let i = 0; i < 230; i++) {
+  for (let i = 0; i < 410; i++) {
     const x = r() * size, y = r() * size, len = 6 + r() * 26, ang = r() * 6.28, bend = (r() - 0.5) * 0.9;
     g.strokeStyle = r() < 0.65 ? `rgba(255,255,248,${0.25 + r() * 0.35})` : `rgba(140,115,80,${0.05 + r() * 0.08})`;
     g.lineWidth = 0.3 + r() * 0.8;
@@ -899,25 +921,29 @@ const TEX = { grain: makeGrain(), washi: makeWashi() };
 document.documentElement.style.setProperty("--grain", `url(${TEX.grain.toDataURL()})`);
 document.documentElement.style.setProperty("--washi", `url(${TEX.washi.toDataURL()})`);
 
-// ---------------------------------------------------------------- paper and light
-// The ground is one bare sheet of washi. Nothing is drawn on it. What changes
-// with the real time of day (?hour=19 previews dusk) is the light: the tone of
-// the paper, and the direction and length of the shadow the reading sheet casts.
+// ---------------------------------------------------------------- paper, light and sky
+// One world, one camera. Up close it is a bare sheet of washi. Zoom out and a
+// pale blue sky is printed over it in halftone dots; the clouds are the paper
+// the press left unprinted. Each doc is a small cloud, each project a large
+// one, and the cloud you dive into opens out into the paper you read on.
+// The light follows the real time of day (?hour=19 previews dusk).
 
 const PAPER = [229, 221, 205];
 const SCENES = [
-  { h: 0,    ink: "#2d3b55", dens: 0.82 },
-  { h: 5.5,  ink: "#6d5a78", dens: 0.55 },
-  { h: 7.5,  ink: "#b88a83", dens: 0.3 },
-  { h: 12,   ink: "#8a8f8c", dens: 0.2 },
-  { h: 17.5, ink: "#c0905a", dens: 0.32 },
-  { h: 19.6, ink: "#5e5478", dens: 0.6 },
-  { h: 21.5, ink: "#2f3d57", dens: 0.8 },
-  { h: 24,   ink: "#2d3b55", dens: 0.82 },
+  { h: 0,    ink: "#2d3b55", dens: 0.82, blue: "#1d335e", sky: 0.92 },
+  { h: 5.5,  ink: "#6d5a78", dens: 0.55, blue: "#3e5a8e", sky: 0.74 },
+  { h: 7.5,  ink: "#b88a83", dens: 0.3,  blue: "#78a5d4", sky: 0.4 },
+  { h: 12,   ink: "#8a8f8c", dens: 0.2,  blue: "#7fb2e0", sky: 0.3 },
+  { h: 17.5, ink: "#c0905a", dens: 0.32, blue: "#6a97cc", sky: 0.46 },
+  { h: 19.6, ink: "#5e5478", dens: 0.6,  blue: "#3a5488", sky: 0.74 },
+  { h: 21.5, ink: "#2f3d57", dens: 0.8,  blue: "#22386a", sky: 0.88 },
+  { h: 24,   ink: "#2d3b55", dens: 0.82, blue: "#1d335e", sky: 0.92 },
 ];
+const RED = [207, 79, 54], GRAPHITE = [52, 48, 44];
 const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
 const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
 const rgb = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 function sceneAt(hour) {
   let i = 0;
@@ -925,7 +951,10 @@ function sceneAt(hour) {
   const A = SCENES[i], B = SCENES[i + 1];
   const t = (hour - A.h) / (B.h - A.h);
   const st = t * t * (3 - 2 * t);
-  return { ink: mix(hex(A.ink), hex(B.ink), st), dens: A.dens + (B.dens - A.dens) * st };
+  return {
+    ink: mix(hex(A.ink), hex(B.ink), st), dens: A.dens + (B.dens - A.dens) * st,
+    blue: mix(hex(A.blue), hex(B.blue), st), sky: A.sky + (B.sky - A.sky) * st,
+  };
 }
 
 // One light source. By day it crosses from the left (morning) to the right
@@ -937,16 +966,405 @@ function lightAt(hour) {
   return { sx: Math.cos(Math.PI * arc) * len, sy: (0.45 + 0.3 * el) * len, sa: 1 };
 }
 
-function landscape() {
-  const cv = $("#stars"), ctx = cv.getContext("2d");
-  const params = new URLSearchParams(location.search);
-  const hourNow = () => {
-    if (params.has("hour")) return Number(params.get("hour")) % 24;
-    const d = new Date();
-    return d.getHours() + d.getMinutes() / 60;
-  };
-  let W, H, dpr, scene, light, sceneT = -Infinity, washiPat, last = "";
+const hourParam = new URLSearchParams(location.search).get("hour");
+const hourNow = () => {
+  if (hourParam !== null && !isNaN(Number(hourParam))) return ((Number(hourParam) % 24) + 24) % 24;
+  const d = new Date();
+  return d.getHours() + d.getMinutes() / 60;
+};
 
+// ---- the sky's layout: where every project's cloud floats
+
+const SKY = { K: 40, origin: { x: 0, y: 0 }, g: null, clouds: [], hover: null };
+const skyEl = $("#sky");
+
+function hashStr(s) {
+  let h = 2166136261;
+  for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+  return ((h >>> 0) % 2147483646) + 1;
+}
+
+// A cumulus: a low, wide base with billows heaped on top, tallest toward the middle.
+function cloudPuffs(seed, W, H) {
+  const r = rnd(seed);
+  r(); r();
+  const puffs = [];
+  for (let i = 0; i < 3; i++) puffs.push({ x: (i - 1) * W * 0.27 + (r() - 0.5) * W * 0.04, y: H * 0.2, r: W * 0.22 * (0.9 + r() * 0.2), w: 0.85 });
+  const n = 6, lean = (r() - 0.5) * 0.3;
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const hump = Math.sin(Math.PI * Math.min(1, Math.max(0, t + lean * (1 - Math.abs(t - 0.5) * 2))));
+    const rad = H * (0.3 + 0.44 * hump) * (0.8 + r() * 0.4);
+    puffs.push({ x: (t - 0.5) * W * 0.8 + (r() - 0.5) * W * 0.05, y: H * 0.08 - H * 0.36 * hump + (r() - 0.5) * H * 0.12, r: rad, w: 1 });
+  }
+  return puffs;
+}
+
+function skyLayout() {
+  const vw = innerWidth, vh = innerHeight, topH = state.layout.topH || 60;
+  const portrait = vh > vw * 1.15;
+  const FW = portrait ? 800 : 1600, FH = portrait ? 1500 : 1000;
+  const personal = state.projects.filter((p) => p.group !== "client");
+  const clients = state.projects.filter((p) => p.group === "client");
+  const pos = {}, size = {};
+  const sz = (p) => { const w = (portrait ? 520 : 380) + 20 * Math.min(p.threads?.length || 0, 6); return [w, w * 0.5]; };
+  const n = personal.length;
+  personal.forEach((p, i) => {
+    if (portrait) pos[p.id] = [FW / 2 + Math.sin(i * 2.4 + 0.5) * FW * 0.12, 220 + (i + 0.5) * (900 / Math.max(1, n))];
+    else if (n <= 4) pos[p.id] = [FW * (0.17 + 0.66 * (n === 1 ? 0.5 : i / (n - 1))), 340 + Math.sin(i * 2.2 + 0.9) * 95];
+    else {
+      const cols = Math.ceil(n / 2), row = i % 2, col = Math.floor(i / 2);
+      pos[p.id] = [FW * (0.14 + 0.72 * (cols === 1 ? 0.5 : col / (cols - 1))) + (row ? 80 : -40), 240 + row * 250 + Math.sin(i * 1.7) * 30];
+    }
+    size[p.id] = sz(p);
+  });
+  const bankY = portrait ? 1290 : 820;
+  const bank = clients.length ? clients : [{ id: "__ghost", name: "Client work", ghost: true, threads: [] }];
+  bank.forEach((p, i) => {
+    const m = bank.length, k = m === 1 ? 0.5 : i / (m - 1);
+    pos[p.id] = portrait ? [FW * (0.3 + 0.4 * k), bankY + 40 + (i % 2) * 90] : [FW * (0.3 + 0.44 * k), bankY + Math.sin(i * 2) * 25];
+    size[p.id] = p.ghost ? [330, 160] : sz(p);
+  });
+  const words = portrait
+    ? [["Your projects", 40, 90], ["Clients", 40, bankY - 110]]
+    : [["Your projects", 70, 120], ["Clients", 70, bankY - 40]];
+  const fit = Math.min(vw / FW, (vh - topH) / FH) * 0.94;
+  return { portrait, FW, FH, pos, size, personal, bank, words, topH, sSky: fit / SKY.K };
+}
+
+// Sky units → world. The project you are in floats right over its latest doc,
+// so diving into its cloud lands you on the page you were reading.
+function skyToWorld([x, y]) {
+  const g = SKY.g, h = g.pos[state.projectId] || [g.FW / 2, g.FH / 2];
+  return { x: SKY.origin.x + (x - h[0]) * SKY.K, y: SKY.origin.y + (y - h[1]) * SKY.K };
+}
+
+function camForSky() {
+  const g = SKY.g, L = state.layout, s = g.sSky;
+  const c = skyToWorld([g.FW / 2, g.FH / 2]);
+  return { x: c.x - (L.vw / 2 - L.cx) / s, y: c.y - (g.topH + (L.vh - g.topH) / 2 - L.cy) / s, s, r: 0 };
+}
+
+// 1 while you are among a thread's docs, 0 up in the sky of projects.
+function levelW(s) {
+  const g = SKY.g;
+  if (!g) return 1;
+  return smooth(Math.log(g.sSky * 2), Math.log(g.sSky * 8), Math.log(s));
+}
+
+function ago(ts) {
+  if (!ts) return "";
+  const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(ts).setHours(0, 0, 0, 0)) / 864e5);
+  return days <= 0 ? "today" : days === 1 ? "yesterday" : days < 7 ? `${days} days ago` : new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function buildSky() {
+  if (!state.projects.length) return;
+  SKY.g = skyLayout();
+  const last = state.docs[state.docs.length - 1];
+  SKY.origin = last ? { x: last.pos.x, y: last.pos.y } : { x: 0, y: 0 };
+  const { docW } = state.layout, tid = state.thread?.id || "";
+  SKY.clouds = state.docs.map((d, i) => {
+    const seed = hashStr(tid + ":" + i);
+    return { kind: "doc", d, puffs: cloudPuffs(seed, docW * 1.15, docW * 0.52), ph: (seed % 628) / 100, depth: 0.8 + (i % 3) * 0.15, hov: 0 };
+  });
+  const g = SKY.g;
+  for (const p of [...g.personal, ...g.bank]) {
+    const [w, h] = g.size[p.id], seed = hashStr(p.id);
+    SKY.clouds.push({
+      kind: "proj", id: p.id, c: skyToWorld(g.pos[p.id]), ghost: !!p.ghost,
+      puffs: cloudPuffs(seed, w * SKY.K, h * SKY.K), ph: (seed % 628) / 100,
+      depth: p.group === "client" || p.ghost ? 1.3 : 0.85 + (seed % 3) * 0.12, hov: 0,
+    });
+  }
+  renderSkyLabels();
+}
+
+function renderSkyLabels() {
+  const g = SKY.g;
+  skyEl.innerHTML = "";
+  for (const p of [...g.personal, ...g.bank]) {
+    const [w, h] = g.size[p.id], c = skyToWorld(g.pos[p.id]);
+    const W = w * SKY.K, H = h * SKY.K;
+    const el = document.createElement(p.ghost ? "div" : "button");
+    el.className = "sky-cloud" + (p.id === state.projectId ? " here" : "") + (p.ghost ? " ghost" : "");
+    el.style.cssText = `left:${c.x - W / 2}px;top:${c.y - H / 2}px;width:${W}px;height:${H}px`;
+    el.innerHTML = `<span class="name"></span><span class="meta"></span>`;
+    $(".name", el).textContent = p.name;
+    const n = p.threads?.length || 0;
+    $(".meta", el).textContent = p.ghost ? "add one in projects.json" : n ? `${n} thread${n === 1 ? "" : "s"} · ${ago(p.threads[0].updated)}` : "start here";
+    if (!p.ghost) {
+      el.setAttribute("aria-label", `${p.name}, ${$(".meta", el).textContent}`);
+      el.addEventListener("click", () => enterProject(p.id));
+      const on = () => (SKY.hover = p.id), off = () => { if (SKY.hover === p.id) SKY.hover = null; };
+      el.addEventListener("pointerenter", on); el.addEventListener("focus", on);
+      el.addEventListener("pointerleave", off); el.addEventListener("blur", off);
+    }
+    skyEl.appendChild(el);
+  }
+  for (const [txt, x, y] of g.words) {
+    const c = skyToWorld([x, y]);
+    const l = document.createElement("div");
+    l.className = "sky-word";
+    l.style.cssText = `left:${c.x}px;top:${c.y}px`;
+    l.textContent = txt;
+    skyEl.appendChild(l);
+  }
+}
+
+// ---- printing the ground
+
+const VS = `#version 300 es
+in vec2 a; void main() { gl_Position = vec4(a, 0., 1.); }`;
+
+// Pass 1: one texel per halftone cell. How much blue ink the cell takes, how
+// much grey (a cloud's underside, away from the light), and how cloudy it is.
+const FS_CELLS = `#version 300 es
+precision highp float;
+#define MAXP 64
+uniform vec2 uCell0; uniform float uPitch; uniform vec2 uRot;
+uniform vec4 uA[MAXP]; uniform int uNA; uniform vec4 uB[MAXP]; uniform int uNB;
+uniform float uW, uT, uDens, uOffA, uOffB; uniform vec2 uSh; uniform vec4 uMoon;
+out vec4 o;
+float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+  return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y); }
+float puff(vec4 c, vec2 p) { vec2 d = (p - c.xy) / c.z; d.y *= 1.3; float q = dot(d, d); float k = max(0., 1. - q); return k * k * c.w; }
+float fA(vec2 p) { float f = 0., m = 0.; for (int i = 0; i < MAXP; i++) { if (i >= uNA) break; float k = puff(uA[i], p); f += k; m = max(m, k); } return m + .28 * (f - m); }
+float fB(vec2 p) { float f = 0., m = 0.; for (int i = 0; i < MAXP; i++) { if (i >= uNB) break; float k = puff(uB[i], p); f += k; m = max(m, k); } return m + .28 * (f - m); }
+float cov(float f, vec2 p) {
+  float n = vn(p * .011 + vec2(uT * .013, uT * .004)) + .5 * vn(p * .033 - vec2(uT * .021, 0.));
+  return smoothstep(.07, .55, f + (n - .75) * .3);
+}
+void main() {
+  if (uDens < .002) { o = vec4(0.); return; }
+  vec2 q = (uCell0 + floor(gl_FragCoord.xy) + .5) * uPitch;
+  vec2 p = vec2(uRot.x * q.x + uRot.y * q.y, -uRot.y * q.x + uRot.x * q.y);
+  float a = 0., b = 0., a2 = 0., b2 = 0.;
+  if (uW > .002) { a = cov(fA(p), p); vec2 s = p + uSh * uOffA; a2 = cov(fA(s), s); }
+  if (uW < .998) { b = cov(fB(p), p); vec2 s = p + uSh * uOffB; b2 = cov(fB(s), s); }
+  float c = mix(b, a, uW);
+  float sh = mix(b * (1. - b2), a * (1. - a2), uW);
+  float ink = uDens * (1. - c);
+  if (uMoon.w > 0.) ink *= 1. - uMoon.w * (1. - smoothstep(uMoon.z * .9, uMoon.z * 1.1, length(p - uMoon.xy)));
+  o = vec4(ink, sh, c, 1.);
+}`;
+
+// Pass 2: print. Washi, then the blue screen at 15°, the red sun, the grey
+// undersides, and the one light falling across it all.
+const FS_PRINT = `#version 300 es
+precision highp float;
+uniform sampler2D uCells; uniform sampler2D uWashi;
+uniform vec2 uRes, uRot, uCell0; uniform float uDpr, uPitch, uDark;
+uniform vec3 uPaper, uBlue, uGraph, uRed, uWM0, uWM1;
+uniform vec4 uLg, uSun;
+out vec4 o;
+void main() {
+  vec2 P = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+  vec2 p = P / uDpr;
+  vec3 col = uPaper;
+  vec4 w = texture(uWashi, vec2(dot(uWM0, vec3(P, 1.)), dot(uWM1, vec3(P, 1.))) / 512.);
+  col = mix(col, w.rgb, w.a * .55);
+  vec2 q = vec2(uRot.x * p.x - uRot.y * p.y, uRot.y * p.x + uRot.x * p.y);
+  vec2 cell = floor(q / uPitch);
+  vec4 c = texelFetch(uCells, ivec2(cell - uCell0), 0);
+  float d = length(q - (cell + .5) * uPitch), aa = .7 / uDpr;
+  float rb = uPitch * .6 * sqrt(c.r);
+  col = mix(col, uBlue, (1. - smoothstep(rb - aa, rb + aa, d)) * .94 * step(.004, c.r));
+  if (uSun.w > 0.) {
+    float disc = 1. - smoothstep(uSun.z - aa, uSun.z + aa, length(p - uSun.xy));
+    col = mix(col, uRed, disc * uSun.w * (1. - c.b));
+  }
+  float rg = uPitch * .5 * sqrt(c.g * .16);
+  col = mix(col, uGraph, (1. - smoothstep(rg - aa, rg + aa, d)) * .42 * step(.02, c.g));
+  float t = clamp(dot(p - uLg.xy, uLg.zw), 0., 1.);
+  col = t < .5 ? mix(col, vec3(1., .988, .957), .2 * (1. - t * 2.)) : mix(col, vec3(.118, .094, .07), uDark * (t * 2. - 1.));
+  o = vec4(col, 1.);
+}`;
+
+function ground() {
+  const cv = $("#ground");
+  const gl = cv.getContext("webgl2", { antialias: false, alpha: false, depth: false, stencil: false, premultipliedAlpha: false });
+  if (!gl) return paperOnly(cv);
+
+  const compile = (fs) => {
+    const p = gl.createProgram();
+    for (const [type, src] of [[gl.VERTEX_SHADER, VS], [gl.FRAGMENT_SHADER, fs]]) {
+      const sh = gl.createShader(type);
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+      gl.attachShader(p, sh);
+    }
+    gl.bindAttribLocation(p, 0, "a");
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    const u = new Proxy({}, { get: (m, k) => (k in m ? m[k] : (m[k] = gl.getUniformLocation(p, k))) });
+    return { p, u };
+  };
+  let P1, P2;
+  try { P1 = compile(FS_CELLS); P2 = compile(FS_PRINT); } catch (e) { console.warn("Sky shader failed, printing paper only:", e); return paperOnly(cv); }
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  const washi = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, washi);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, TEX.washi);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+  const cells = gl.createTexture(), fbo = gl.createFramebuffer();
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, cells);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  const PITCH = 6, ANG = (15 * Math.PI) / 180, ROTV = [Math.cos(ANG), Math.sin(ANG)];
+  let W, H, dpr, cell0, cw = 0, ch = 0;
+  const resize = () => {
+    dpr = Math.min(2, devicePixelRatio || 1);
+    W = cv.width = Math.round(innerWidth * dpr);
+    H = cv.height = Math.round(innerHeight * dpr);
+    // the halftone grid is turned 15°: find the cells that cover the screen
+    let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+    for (const [x, y] of [[0, 0], [innerWidth, 0], [0, innerHeight], [innerWidth, innerHeight]]) {
+      const qx = ROTV[0] * x - ROTV[1] * y, qy = ROTV[1] * x + ROTV[0] * y;
+      mnx = Math.min(mnx, qx); mny = Math.min(mny, qy); mxx = Math.max(mxx, qx); mxy = Math.max(mxy, qy);
+    }
+    cell0 = [Math.floor(mnx / PITCH) - 1, Math.floor(mny / PITCH) - 1];
+    cw = Math.ceil(mxx / PITCH) - cell0[0] + 2;
+    ch = Math.ceil(mxy / PITCH) - cell0[1] + 2;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, cells);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cw, ch, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cells, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    last = "";
+  };
+  let scene, light, sceneT = -Infinity, last = "", lastDraw = 0, hour = 12;
+  resize();
+  addEventListener("resize", resize);
+  cv.addEventListener("webglcontextlost", (e) => e.preventDefault());
+
+  const A = new Float32Array(64 * 4), B = new Float32Array(64 * 4);
+
+  const frame = (now) => {
+    requestAnimationFrame(frame);
+    if (now - sceneT > 30000) {
+      hour = hourNow();
+      scene = sceneAt(hour); light = lightAt(hour); sceneT = now; last = "";
+      document.body.classList.toggle("night", scene.dens > 0.6);
+      const rs = document.documentElement.style;
+      rs.setProperty("--sx", light.sx.toFixed(3));
+      rs.setProperty("--sy", light.sy.toFixed(3));
+      rs.setProperty("--sa", light.sa.toFixed(2));
+    }
+    const c = state.cam, L = state.layout, s = c.s;
+    const lw = levelW(s);
+    const pres = (1 - smooth(0.38, 0.85, s)) * (state.holdNear ? 0.45 : 1);
+    const dens = scene.sky * pres;
+    let hovering = false;
+    for (const cl of SKY.clouds) {
+      const want = cl.id && cl.id === SKY.hover ? 1 : 0;
+      if (Math.abs(cl.hov - want) > 0.004) { cl.hov += (want - cl.hov) * (reduceMotion ? 1 : 0.12); hovering = true; }
+    }
+    const key = [c.x, c.y, c.s, c.r, L.cx, L.cy].map((v) => (v || 0).toFixed(2)).join();
+    const alive = dens > 0.002 && !reduceMotion && now - lastDraw > 50;
+    if (key === last && !alive && !hovering) return;
+    last = key; lastDraw = now;
+
+    // world → screen, exactly as #world is transformed
+    const th = (-c.r * Math.PI) / 180, co = Math.cos(th), si = Math.sin(th);
+    const t = reduceMotion ? 0 : now / 1000;
+    const vw = L.vw, vh = L.vh;
+    const fill = (arr, list, infl) => {
+      let n = 0, rs = 0;
+      for (const cl of list) {
+        const cx0 = cl.kind === "doc" ? cl.d.pos.x : cl.c.x, cy0 = cl.kind === "doc" ? cl.d.pos.y : cl.c.y;
+        const k = infl * (1 + 0.07 * cl.hov) * (1 + 0.012 * Math.sin((t * 2 * Math.PI) / 41 + cl.ph));
+        const dx = 5 * cl.depth * Math.sin((t * 2 * Math.PI) / (200 * cl.depth) + cl.ph), dy = 2 * Math.sin((t * 2 * Math.PI) / 290 + cl.ph * 1.7);
+        for (const pf of cl.puffs) {
+          if (n >= 64) break;
+          const wx = cx0 + pf.x * k - c.x, wy = cy0 + pf.y * k - c.y;
+          const x = L.cx + s * (wx * co - wy * si) + dx, y = L.cy + s * (wx * si + wy * co) + dy, r = pf.r * k * s;
+          if (r < 0.8 || x < -r || y < -r || x > vw + r || y > vh + r) continue;
+          arr.set([x, y, r, pf.w * (cl.ghost ? 0.72 : 1)], n * 4);
+          rs += r; n++;
+        }
+      }
+      return [n, n ? (rs / n) * 0.2 : 0];
+    };
+    let nA = 0, nB = 0, offA = 0, offB = 0;
+    if (dens > 0.002) {
+      if (lw > 0.002) [nA, offA] = fill(A, SKY.clouds.filter((x) => x.kind === "doc"), 1 + 2.6 * smooth(0.28, 0.95, s));
+      if (lw < 0.998) [nB, offB] = fill(B, SKY.clouds.filter((x) => x.kind === "proj"), 1);
+    }
+    const sl = Math.hypot(light.sx, light.sy) || 1;
+    const night = smooth(0.62, 0.8, scene.dens), skyOnly = 1 - lw;
+    // the sun crosses the sky with the hour; at night a moon is left unprinted
+    const arc = Math.max(0, Math.min(1, (hour - 6) / 12.5)), topH = SKY.g?.topH || 60;
+    const sunR = Math.min(vw, vh) * 0.034;
+    const sun = [vw * (0.1 + 0.8 * arc), topH + (vh - topH) * (0.34 - 0.22 * Math.sin(Math.PI * arc)), sunR, skyOnly * (1 - night) * (dens > 0.002 ? 1 : 0)];
+    const moon = [vw * 0.8, topH + (vh - topH) * 0.16, sunR * 0.85, skyOnly * night];
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.viewport(0, 0, cw, ch);
+    gl.useProgram(P1.p);
+    const u1 = P1.u;
+    gl.uniform2f(u1.uCell0, cell0[0], cell0[1]);
+    gl.uniform1f(u1.uPitch, PITCH);
+    gl.uniform2f(u1.uRot, ROTV[0], ROTV[1]);
+    gl.uniform4fv(u1.uA, A); gl.uniform1i(u1.uNA, nA);
+    gl.uniform4fv(u1.uB, B); gl.uniform1i(u1.uNB, nB);
+    gl.uniform1f(u1.uW, lw);
+    gl.uniform1f(u1.uT, t % 10000);
+    gl.uniform1f(u1.uDens, dens);
+    gl.uniform1f(u1.uOffA, offA); gl.uniform1f(u1.uOffB, offB);
+    gl.uniform2f(u1.uSh, light.sx / sl, light.sy / sl);
+    gl.uniform4f(u1.uMoon, ...moon);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, W, H);
+    gl.useProgram(P2.p);
+    const u2 = P2.u;
+    gl.uniform1i(u2.uCells, 0); gl.uniform1i(u2.uWashi, 1);
+    gl.uniform2f(u2.uRes, W, H);
+    gl.uniform2f(u2.uRot, ROTV[0], ROTV[1]);
+    gl.uniform2f(u2.uCell0, cell0[0], cell0[1]);
+    gl.uniform1f(u2.uDpr, dpr);
+    gl.uniform1f(u2.uPitch, PITCH);
+    gl.uniform1f(u2.uDark, 0.13 + scene.dens * 0.12);
+    gl.uniform3fv(u2.uPaper, mix(PAPER, scene.ink, scene.dens * 0.42).map((v) => v / 255));
+    gl.uniform3fv(u2.uBlue, scene.blue.map((v) => v / 255));
+    gl.uniform3fv(u2.uGraph, GRAPHITE.map((v) => v / 255));
+    gl.uniform3fv(u2.uRed, RED.map((v) => v / 255));
+    // The paper's fibres belong to the world: they slide, turn and scale with the camera.
+    const fs = Math.max(0.55, s);
+    const M = new DOMMatrix().translate(L.cx * dpr, L.cy * dpr).scale(fs * dpr).rotate(-c.r).translate(-c.x * (s / fs), -c.y * (s / fs)).inverse();
+    gl.uniform3f(u2.uWM0, M.a, M.c, M.e);
+    gl.uniform3f(u2.uWM1, M.b, M.d, M.f);
+    const ux = light.sx / sl, uy = light.sy / sl, R = Math.hypot(vw, vh) * 0.55;
+    gl.uniform4f(u2.uLg, vw / 2 - ux * R, vh / 2 - uy * R, ux / (2 * R), uy / (2 * R));
+    gl.uniform4f(u2.uSun, ...sun);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+  requestAnimationFrame(frame);
+}
+
+// Without WebGL 2: the bare paper and its light, no sky.
+function paperOnly(cv) {
+  const ctx = cv.getContext("2d");
+  let W, H, dpr, washiPat, last = "", sceneT = -Infinity, scene, light;
   const resize = () => {
     dpr = Math.min(1.5, devicePixelRatio || 1);
     W = cv.width = Math.round(innerWidth * dpr); H = cv.height = Math.round(innerHeight * dpr);
@@ -955,202 +1373,82 @@ function landscape() {
   };
   resize();
   addEventListener("resize", resize);
-
   const frame = (now) => {
+    requestAnimationFrame(frame);
     if (now - sceneT > 30000) {
       const hr = hourNow();
       scene = sceneAt(hr); light = lightAt(hr); sceneT = now; last = "";
       document.body.classList.toggle("night", scene.dens > 0.6);
       const rs = document.documentElement.style;
-      rs.setProperty("--sx", light.sx.toFixed(3));
-      rs.setProperty("--sy", light.sy.toFixed(3));
-      rs.setProperty("--sa", light.sa.toFixed(2));
-      // Water is always a pale printed blue, just dimmed a little at night.
-      rs.setProperty("--water-a", rgb(mix([150, 182, 198], [52, 66, 92], Math.max(0, scene.dens - 0.3) * 0.6)));
-      rs.setProperty("--water-b", rgb(mix([136, 170, 188], [48, 62, 88], Math.max(0, scene.dens - 0.3) * 0.6)));
-      rs.setProperty("--bank", rgb(mix(scene.ink, [70, 90, 110], 0.5)));
+      rs.setProperty("--sx", light.sx.toFixed(3)); rs.setProperty("--sy", light.sy.toFixed(3)); rs.setProperty("--sa", light.sa.toFixed(2));
     }
-    // Only repaint when the camera has moved: the paper is still otherwise.
     const c = state.cam, { cx = 0, cy = 0 } = state.layout;
     const key = [c.x, c.y, c.s, c.r, cx, cy].map((v) => v.toFixed(2)).join();
-    if (key !== last) {
-      last = key;
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = rgb(mix(PAPER, scene.ink, scene.dens * 0.42));
-      ctx.fillRect(0, 0, W, H);
-
-      // The paper's fibres belong to the world, not the screen: they slide, turn
-      // and scale with the camera, so sheets feel laid on a real surface.
-      const fs = Math.max(0.55, c.s); // keep fibres from turning to dust far out
-      washiPat.setTransform(new DOMMatrix().translate(cx * dpr, cy * dpr).scale(fs * dpr).rotate(-c.r).translate(-c.x * (c.s / fs), -c.y * (c.s / fs)));
-      ctx.globalAlpha = 0.55;
-      ctx.fillStyle = washiPat;
-      ctx.fillRect(0, 0, W, H);
-      ctx.globalAlpha = 1;
-
-      // Light pools on the side it comes from and falls off toward the other.
-      const n = Math.hypot(light.sx, light.sy) || 1, ux = light.sx / n, uy = light.sy / n, R = Math.hypot(W, H) * 0.55;
-      const lg = ctx.createLinearGradient(W / 2 - ux * R, H / 2 - uy * R, W / 2 + ux * R, H / 2 + uy * R);
-      lg.addColorStop(0, "rgba(255,252,244,0.20)");
-      lg.addColorStop(0.5, "rgba(255,252,244,0)");
-      lg.addColorStop(1, `rgba(30,24,18,${0.13 + scene.dens * 0.12})`);
-      ctx.fillStyle = lg;
-      ctx.fillRect(0, 0, W, H);
-    }
-    requestAnimationFrame(frame);
+    if (key === last) return;
+    last = key;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = rgb(mix(PAPER, scene.ink, scene.dens * 0.42));
+    ctx.fillRect(0, 0, W, H);
+    const fs = Math.max(0.55, c.s);
+    washiPat.setTransform(new DOMMatrix().translate(cx * dpr, cy * dpr).scale(fs * dpr).rotate(-c.r).translate(-c.x * (c.s / fs), -c.y * (c.s / fs)));
+    ctx.globalAlpha = 0.55; ctx.fillStyle = washiPat; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1;
   };
   requestAnimationFrame(frame);
 }
 
-// ---------------------------------------------------------------- the river (all projects)
-// Zoomed all the way out, each project is a lily pad on a river. Client work
-// floats in its own pond, kept apart from personal projects.
-
-const riverWorld = $("#river-world");
+// ---------------------------------------------------------------- moving between levels
+// O rises one level: doc → its thread's clouds → the sky of all projects.
+// Diving back down is the same camera, the other way.
 
 async function loadProjects() {
   state.projects = await api("/api/projects");
   return state.projects;
 }
 
-function riverGeometry() {
-  const portrait = innerHeight > innerWidth * 1.15;
-  // Design in a 1600×1000 landscape; on tall screens, turn it on its side.
-  const T = portrait ? ([x, y]) => [y * 0.95, x] : ([x, y]) => [x, y];
-  const W = portrait ? 950 : 1600, H = portrait ? 1600 : 1000;
-  const at = (t) => [-150 + 1900 * t, 360 + 120 * Math.sin(t * Math.PI * 2 + 0.5)];
-  const river = Array.from({ length: 61 }, (_, i) => T(at(i / 60)));
-  const pond = { c: T([1220, 800]), rx: portrait ? 170 : 330, ry: portrait ? 330 : 150 };
-  return { portrait, T, W, H, at, river, pond };
+function setView(v) {
+  state.view = v;
+  document.body.classList.toggle("sky", v === "sky");
 }
 
-function renderRiver() {
-  const g = riverGeometry();
-  const personal = state.projects.filter((p) => p.group !== "client");
-  const clients = state.projects.filter((p) => p.group === "client");
-  const pathD = g.river.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-  const [pcx, pcy] = g.pond.c;
-  $("#river-svg").setAttribute("viewBox", `0 0 ${g.W} ${g.H}`);
-  $("#river-svg").setAttribute("width", g.W);
-  $("#river-svg").setAttribute("height", g.H);
-  $("#river-svg").innerHTML = `
-    <defs><pattern id="grainpat" patternUnits="userSpaceOnUse" width="512" height="512"><image href="${TEX.grain.toDataURL()}" width="512" height="512" /></pattern></defs>
-    <path class="bank" d="${pathD}" />
-    <path class="water" d="${pathD}" />
-    <path class="grainline" d="${pathD}" />
-    <path class="shimmer" d="${pathD}" />
-    <path class="shimmer two" d="${pathD}" />
-    <ellipse class="bank" cx="${pcx}" cy="${pcy}" rx="${g.pond.rx + 30}" ry="${g.pond.ry + 30}" />
-    <ellipse class="water" cx="${pcx}" cy="${pcy}" rx="${g.pond.rx}" ry="${g.pond.ry}" />
-    <ellipse class="grainfill" cx="${pcx}" cy="${pcy}" rx="${g.pond.rx}" ry="${g.pond.ry}" />
-    <ellipse class="shimmer" cx="${pcx}" cy="${pcy}" rx="${g.pond.rx * 0.8}" ry="${g.pond.ry * 0.7}" />`;
-
-  const pads = $("#pads");
-  pads.innerHTML = "";
-  state.riverPads = {};
-  const place = (p, x, y, ghost = false) => {
-    const recent = p.threads?.[0] && Date.now() - p.threads[0].updated < 36e5 * 24;
-    const size = ghost ? 150 : 160 + 14 * Math.min(p.threads?.length || 0, 6);
-    const b = document.createElement(ghost ? "div" : "button");
-    b.className = "lilypad" + (recent ? " bloom" : "") + (ghost ? " ghost" : "") + (p.id === state.projectId ? " here" : "");
-    b.style.cssText = `left:${x - size / 2}px;top:${y - size / 2}px;width:${size}px;height:${size}px;--d:${(x % 7).toFixed(1)}s`;
-    b.innerHTML = `<span class="lily"></span><span class="pad-name"></span><span class="pad-meta"></span>`;
-    $(".pad-name", b).textContent = p.name;
-    if (!ghost) {
-      const n = p.threads?.length || 0;
-      $(".pad-meta", b).textContent = n ? `${n} thread${n === 1 ? "" : "s"}` : "start here";
-      b.addEventListener("click", () => enterProject(p.id));
-      state.riverPads[p.id] = { x, y };
-    } else $(".pad-meta", b).textContent = "add one in projects.json";
-    pads.appendChild(b);
-  };
-  personal.forEach((p, i) => {
-    const t = (i + 0.7) / (personal.length + 0.4);
-    const [x, y] = g.T(g.at(Math.min(0.92, t * 0.85 + 0.04)));
-    place(p, x, y + (g.portrait ? 0 : i % 2 ? 26 : -26));
-  });
-  if (clients.length) {
-    clients.forEach((p, i) => {
-      const k = (i + 1) / (clients.length + 1) - 0.5;
-      const [x, y] = g.portrait ? [pcx, pcy + k * g.pond.ry * 1.6] : [pcx + k * g.pond.rx * 1.6, pcy];
-      place(p, x, y);
-    });
-  } else place({ name: "Client work" }, pcx, pcy, true);
-
-  const labels = g.portrait
-    ? [["Your projects", 250, -70], ["Clients", pcx - g.pond.rx + 20, pcy - g.pond.ry - 80]]
-    : [["Your projects", 90, 120], ["Clients", pcx - 60, pcy - g.pond.ry - 80]];
-  for (const [txt, x, y] of labels) {
-    const l = document.createElement("div");
-    l.className = "river-label";
-    l.style.cssText = `left:${x}px;top:${y}px`;
-    l.textContent = txt;
-    pads.appendChild(l);
-  }
-  riverWorld.style.width = g.W + "px";
-  riverWorld.style.height = g.H + "px";
-  return g;
-}
-
-function riverFit(g) {
-  const topH = state.layout.topH;
-  const s = Math.min(innerWidth / g.W, (innerHeight - topH) / g.H) * 0.94;
-  return { x: g.W / 2, y: g.H / 2, s, oy: topH / 2 };
-}
-
-function setRiverCam(c, animate) {
-  riverWorld.style.transition = animate && !reduceMotion ? "transform 1.6s var(--ease), opacity 1.2s var(--ease)" : "none";
-  riverWorld.style.transform = `translate(${innerWidth / 2}px, ${innerHeight / 2 + (c.oy || 0)}px) scale(${c.s}) translate(${-c.x}px, ${-c.y}px)`;
-}
-
-async function showRiver({ instant = false } = {}) {
-  if (state.view === "river" && !instant) return;
+async function showSky() {
+  if (state.view === "sky") return;
   hidePopover();
   closeDrawer();
+  $("#notes-panel").classList.remove("open");
   await loadProjects().catch(() => {});
-  const g = renderRiver();
-  const fit = riverFit(g);
-  const pad = state.riverPads[state.projectId];
-  // Labels stay one readable size whatever the zoom.
-  riverWorld.style.setProperty("--rs", fit.s.toFixed(3));
-  state.view = "river";
-  document.body.classList.add("river");
-  if (instant) {
-    setRiverCam(fit, false);
-    return;
-  }
-  // The docs sink away while the river rises up from this project's pad.
-  if (state.docs.length) {
-    const o = camForOverview();
-    flyTo({ ...o, s: o.s * 0.2, r: 0 }, { dip: false, duration: 1200 });
-  }
-  setRiverCam(pad ? { ...fit, x: pad.x, y: pad.y, s: fit.s * 3 } : { ...fit, s: fit.s * 1.6 }, false);
-  riverWorld.offsetWidth; // commit the start position before animating
-  setRiverCam(fit, true);
+  buildSky();
+  if (!SKY.g) return;
+  state.overview = false;
+  document.body.classList.remove("overview");
+  $("#btn-overview").classList.remove("active");
+  setView("sky");
+  updateNav();
+  await flyTo(camForSky(), { dip: false, duration: reduceMotion ? 1 : 2400 });
 }
 
 async function enterProject(pid, threadId) {
-  const g = riverGeometry();
-  const fit = riverFit(g);
-  const pad = state.riverPads[pid];
-  if (pad) setRiverCam({ ...fit, x: pad.x, y: pad.y, s: fit.s * 3.2 }, true);
-  await new Promise((r) => setTimeout(r, reduceMotion ? 0 : 650));
-  state.view = "thread";
-  document.body.classList.remove("river");
-  state.projectId = pid;
   const proj = state.projects.find((p) => p.id === pid);
   const target = threadId && (!proj || proj.threads.some((t) => t.id === threadId)) ? threadId : proj?.threads?.[0]?.id;
-  if (target) await openThread(target);
-  else await newThread(pid);
+  if (pid === state.projectId && state.thread && (!target || target === state.thread.id)) {
+    setView("thread");
+    return focusDoc(state.docs.length - 1, { duration: reduceMotion ? 1 : 2600, dip: false });
+  }
+  // Drift over to that cloud, then sink into it.
+  const cl = SKY.clouds.find((x) => x.id === pid);
+  if (cl && !reduceMotion) await flyTo({ x: cl.c.x, y: cl.c.y, s: SKY.g.sSky * 2.6, r: 0 }, { dip: false, duration: 1300 });
+  state.projectId = pid;
+  if (target) await openThread(target, { from: "sky" });
+  else await newThread(pid, { from: "sky" });
 }
 
 // ---------------------------------------------------------------- overview pan / zoom
 
 function overviewControls() {
   const vp = $("#viewport");
+  const far = () => state.overview || state.view === "sky";
   let drag = null;
   vp.addEventListener("pointerdown", (e) => {
-    if (!state.overview || e.button !== 0) return;
+    if (!far() || e.button !== 0 || flight) return;
     drag = { x: e.clientX, y: e.clientY, cam: { ...state.cam }, moved: false };
   });
   addEventListener("pointermove", (e) => {
@@ -1164,18 +1462,40 @@ function overviewControls() {
   addEventListener("pointerup", () => { if (drag?.moved) suppressClick = true; drag = null; setTimeout(() => (suppressClick = false), 0); });
   let suppressClick = false;
   vp.addEventListener("click", (e) => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); } }, true);
-  vp.addEventListener("wheel", (e) => {
-    if (state.overview) {
+  // One continuous zoom: scroll (or pinch) from a thread's clouds up into the sky and back.
+  let settle;
+  addEventListener("wheel", (e) => {
+    if (e.target.closest?.("#drawer, #notes-panel, .doc-scroll, #composer")) {
+      if (!(e.ctrlKey && e.deltaY > 0 && !far())) return;
+    }
+    if (far() && !flight) {
       e.preventDefault();
-      const f = Math.exp(-e.deltaY * 0.0015);
-      state.cam.s = Math.max(0.05, Math.min(1.2, state.cam.s * f));
+      const c = state.cam, L = state.layout;
+      const s1 = Math.max((SKY.g?.sSky || 0.02) * 0.75, Math.min(0.62, c.s * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018))));
+      // keep the point under the cursor still
+      const th = (-c.r * Math.PI) / 180, mx = (e.clientX - L.cx) , my = (e.clientY - L.cy);
+      const wx = (mx * Math.cos(th) + my * Math.sin(th)), wy = (-mx * Math.sin(th) + my * Math.cos(th));
+      c.x += wx / c.s - wx / s1; c.y += wy / c.s - wy / s1; c.s = s1;
       applyCam();
-    } else if (e.ctrlKey && e.deltaY > 0) {
-      // pinch out on a trackpad → zoom to overview
+      const up = levelW(s1) < 0.5;
+      if (up && state.view !== "sky") { state.overview = false; document.body.classList.remove("overview"); buildSky(); setView("sky"); updateNav(); }
+      else if (!up && state.view === "sky") { setView("thread"); state.overview = true; document.body.classList.add("overview"); updateNav(); }
+      clearTimeout(settle);
+      // zoomed all the way in on a thread: land on the nearest sheet;
+      // all the way out: let the sky settle into frame
+      if (s1 >= 0.62 && e.deltaY < 0) settle = setTimeout(() => focusDoc(nearestDoc()), 160);
+      else if (s1 < (SKY.g?.sSky || 0) * 1.25 && SKY.g) settle = setTimeout(() => flyTo(camForSky(), { dip: false, duration: 900 }), 220);
+    } else if (e.ctrlKey && e.deltaY > 0 && state.view === "thread") {
       e.preventDefault();
       toggleOverview(true);
     }
   }, { passive: false });
+}
+
+function nearestDoc() {
+  let best = 0, bd = Infinity;
+  state.docs.forEach((d, i) => { const k = Math.hypot(d.pos.x - state.cam.x, d.pos.y - state.cam.y); if (k < bd) { bd = k; best = i; } });
+  return best;
 }
 
 // ---------------------------------------------------------------- voice
@@ -1218,9 +1538,9 @@ $("#btn-threads").addEventListener("click", openDrawer);
 $("#drawer-close").addEventListener("click", closeDrawer);
 $("#drawer-scrim").addEventListener("click", closeDrawer);
 $("#drawer-new").addEventListener("click", () => newThread());
-$("#btn-new").addEventListener("click", () => (state.view === "river" ? null : newThread()));
-$("#brand").addEventListener("click", () => (state.view === "river" ? enterProject(state.projectId, state.thread?.id) : showRiver()));
-$("#drawer-river").addEventListener("click", () => { closeDrawer(); showRiver(); });
+$("#btn-new").addEventListener("click", () => (state.view === "sky" ? null : newThread()));
+$("#brand").addEventListener("click", () => (state.view === "sky" ? enterProject(state.projectId, state.thread?.id) : showSky()));
+$("#drawer-river").addEventListener("click", () => { closeDrawer(); showSky(); });
 $("#btn-overview").addEventListener("click", zoomOut);
 $("#nav-prev").addEventListener("click", () => focusDoc(state.focus - 1));
 $("#nav-next").addEventListener("click", () => focusDoc(state.focus + 1));
@@ -1246,8 +1566,13 @@ addEventListener("keydown", (e) => {
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
-  if (state.view === "river") {
-    if (e.key === "Escape" || e.key === "o" || e.key === "O") enterProject(state.projectId, state.thread?.id);
+  if (state.view === "sky") {
+    if (["Escape", "Enter", "o", "O"].includes(e.key)) enterProject(state.projectId, state.thread?.id);
+    return;
+  }
+  // Type anywhere to start writing; the single letters below stay shortcuts.
+  if (e.key.length === 1 && !/^[otnpOTNP/]$/.test(e.key) && !state.busy && !state.overview) {
+    input.focus({ preventScroll: true });
     return;
   }
   if (e.key === "ArrowRight") { e.preventDefault(); focusDoc(Math.min(state.docs.length - 1, state.focus + 1)); }
@@ -1256,7 +1581,7 @@ addEventListener("keydown", (e) => {
   else if (e.key === "Escape") { if (state.overview) toggleOverview(false); closeDrawer(); }
   else if (e.key === "t" || e.key === "T") openDrawer();
   else if (e.key === "n" || e.key === "N") newThread();
-  else if (e.key === "p" || e.key === "P") showRiver();
+  else if (e.key === "p" || e.key === "P") showSky();
   else if (e.key === "/") { e.preventDefault(); input.focus(); }
 });
 
@@ -1266,7 +1591,7 @@ addEventListener("resize", () => {
   resizeT = setTimeout(() => {
     measure();
     placeDocs();
-    Object.assign(state.cam, state.overview ? camForOverview() : state.focus >= 0 ? camForDoc(state.focus) : state.cam);
+    Object.assign(state.cam, state.view === "sky" && SKY.g ? camForSky() : state.overview ? camForOverview() : state.focus >= 0 ? camForDoc(state.focus) : state.cam);
     applyCam();
   }, 80);
 });
@@ -1289,7 +1614,7 @@ function quietChrome() {
 async function boot() {
   measure();
   quietChrome();
-  landscape();
+  ground();
   overviewControls();
   voice();
   tickClock();
@@ -1301,16 +1626,14 @@ async function boot() {
     $(".status-text", st).textContent = { plan: "Your plan", api: "API", demo: "Demo" }[s.engine] || "Demo";
     st.title = s.engine === "plan" ? `Running on your Claude plan via Claude Code. Tools: ${s.tools.join(", ")}` : s.engine === "api" ? `Claude API · ${s.model}` : "Demo mode: replies are canned. See README.";
   } catch {}
-  await loadProjects();
+  await loadProjects().catch(() => {});
   const list = await api("/api/threads");
   let last = null;
   try { last = localStorage.getItem("shell.lastThread"); } catch {}
   const pick = list.find((t) => t.id === last) || list[0];
-  // Open on the river for a moment, then glide into where you left off.
   state.projectId = pick?.projectId || state.projects[0]?.id;
-  await showRiver({ instant: true });
-  await new Promise((r) => setTimeout(r, reduceMotion ? 0 : 1100));
-  await enterProject(state.projectId, pick?.id);
+  if (pick) await openThread(pick.id, { from: "boot" });
+  else await newThread(state.projectId, { from: "boot" });
 }
 
 boot();
