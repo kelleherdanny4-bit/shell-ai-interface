@@ -632,7 +632,7 @@ async function openThread(id, { intro = true } = {}) {
     await focusDoc(last, { duration: reduceMotion ? 1 : 2000 });
   } else focusDoc(last);
   if (!matchMedia("(pointer: coarse)").matches) input.focus({ preventScroll: true });
-  if (innerWidth <= 760) input.placeholder = "Ask, or select text to note";
+  if (innerWidth <= 760) input.placeholder = "Ask anything";
 }
 
 async function newThread() {
