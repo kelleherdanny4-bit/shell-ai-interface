@@ -28,7 +28,7 @@ const state = {
 
 // ---------------------------------------------------------------- layout
 
-const ROT = [0, -5, 4, -3, 6, -4, 3];
+const ROT = [0, -2.5, 2, -1.5, 3, -2, 1.5];
 
 function measure() {
   const vw = innerWidth, vh = innerHeight;
@@ -83,12 +83,7 @@ function drawLinks() {
       path += ` C${mx},${py} ${mx},${y} ${x},${y}`;
     }
   });
-  const R = state.layout.docW * 0.78;
-  const rings = pts.map(([x, y], i) => `
-    <circle class="ring" cx="${x}" cy="${y}" r="${R}" />
-    <circle class="ring spin" cx="${x}" cy="${y}" r="${R * 0.92}" />
-    <circle class="ring spin rev" cx="${x}" cy="${y}" r="${R * 1.08}" />`).join("");
-  linksEl.innerHTML = `${rings}<path class="trail" d="${path}" />`;
+  linksEl.innerHTML = `<path class="trail" d="${path}" />`;
 }
 
 // ---------------------------------------------------------------- camera
@@ -99,15 +94,15 @@ function applyCam() {
   world.style.transform = `translate(${cx}px,${cy}px) scale(${c.s}) rotate(${-c.r}deg) translate(${-c.x}px,${-c.y}px)`;
 }
 
-const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const ease = (t) => t * t * t * (t * (6 * t - 15) + 10); // smootherstep: unhurried
 let flight = null;
 
 function flyTo(target, { duration, dip = true } = {}) {
   const from = { ...state.cam };
   const dist = Math.hypot(target.x - from.x, target.y - from.y);
-  const d = reduceMotion ? 1 : duration ?? Math.min(1900, 900 + dist * 0.35);
+  const d = reduceMotion ? 1 : duration ?? Math.min(2600, 1300 + dist * 0.4);
   // Prezi-style swoop: zoom out mid-flight, more for longer trips.
-  const k = dip ? Math.max(0.3, Math.min(0.92, 1 - dist / (dist + state.layout.vw * 0.9))) : 1;
+  const k = dip ? Math.max(0.45, Math.min(0.94, 1 - dist / (dist + state.layout.vw * 0.9))) : 1;
   const t0 = performance.now();
   world.classList.add("flying");
   if (flight) cancelAnimationFrame(flight.raf);
@@ -215,7 +210,7 @@ function makeDoc(d) {
 }
 
 function renumber() {
-  state.docs.forEach((d, i) => ($(".idx", d.el).textContent = `DOC ${String(i + 1).padStart(2, "0")}`));
+  state.docs.forEach((d, i) => ($(".idx", d.el).textContent = `Doc ${i + 1}`));
 }
 
 function renderBody(d, { animate = true } = {}) {
@@ -274,7 +269,7 @@ function addGutters(d) {
 }
 
 function thinkingMarkup() {
-  return `<div class="thinking"><div class="label">THINKING</div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div></div>`;
+  return `<div class="thinking"><div class="label">Thinking it through…</div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div></div>`;
 }
 
 // ---------------------------------------------------------------- notes & highlights
@@ -351,7 +346,7 @@ function renderNotes() {
     card.className = "note-card";
     const di = state.docs.findIndex((d) => d.id === note.docId);
     card.innerHTML = `<div class="q"></div><div class="n" contenteditable="plaintext-only" spellcheck="true"></div>
-      <div class="meta"><span class="doc-tag">${di >= 0 ? "DOC " + String(di + 1).padStart(2, "0") : "DOC"}</span><span>${fmtTime(note.at)}</span><button class="del" title="Delete note">delete</button></div>`;
+      <div class="meta"><span class="doc-tag">${di >= 0 ? "Doc " + (di + 1) : "Doc"}</span><span>${fmtTime(note.at)}</span><button class="del" title="Delete note">delete</button></div>`;
     $(".q", card).textContent = note.quote.length > 180 ? note.quote.slice(0, 180) + "…" : note.quote;
     const nEl = $(".n", card);
     nEl.textContent = note.note;
@@ -547,7 +542,7 @@ async function send() {
           d.text += data.text;
           if (!dirty) { dirty = true; requestAnimationFrame(flush); }
         } else if (ev === "usage") {
-          $("#composer-meta").textContent = `${data.output.toLocaleString()} tokens out · ${data.cached ? Math.round((100 * data.cached) / Math.max(1, data.input + data.cached)) + "% cached · " : ""}← → move · O overview`;
+          // usage is available here if we want a cost readout later
         } else if (ev === "done") {
           Object.assign(d, { id: data.doc.id, title: data.doc.title, at: data.doc.at });
           state.thread.title = data.threadTitle;
@@ -673,8 +668,8 @@ function closeDrawer() {
 // ---------------------------------------------------------------- HUD
 
 function updateNav() {
-  const c = $("#constellation");
-  c.innerHTML = "";
+  $("#constellation").innerHTML = '<div class="track"></div>';
+  const c = $("#constellation .track");
   const noteDocs = new Set(state.notes.map((n) => n.docId));
   state.docs.forEach((d, i) => {
     if (i) c.appendChild(document.createElement("i"));
@@ -708,44 +703,135 @@ function autoGrow() {
   input.style.height = Math.min(input.scrollHeight, innerHeight * 0.3) + "px";
 }
 
-// ---------------------------------------------------------------- starfield
+// ---------------------------------------------------------------- landscape
+// A living backdrop: sky, sun or moon, layered hills, drifting mist and motes.
+// It follows the real time of day (try ?hour=19 to preview dusk).
 
-function starfield() {
+const SCENES = [
+  { h: 0,    top: "#0e1a28", bot: "#26394a", far: "#34495a", near: "#0f1a21", mist: [190, 205, 220, 0.07], mote: [255, 233, 160], glow: 1, sun: [220, 230, 240] },
+  { h: 5.5,  top: "#2a3753", bot: "#b98c84", far: "#6c6f80", near: "#252a33", mist: [230, 200, 190, 0.10], mote: [255, 233, 180], glow: 0.6, sun: [255, 214, 170] },
+  { h: 7.5,  top: "#9db6cc", bot: "#f5d6b4", far: "#a9b5c0", near: "#4a5c55", mist: [255, 240, 225, 0.22], mote: [255, 250, 235], glow: 0, sun: [255, 226, 170] },
+  { h: 12,   top: "#a6c8d8", bot: "#eef0e3", far: "#b5c8c3", near: "#55705a", mist: [250, 252, 248, 0.20], mote: [255, 255, 250], glow: 0, sun: [255, 248, 225] },
+  { h: 17.5, top: "#93b2c6", bot: "#f6d9a8", far: "#c2b8a6", near: "#58593f", mist: [255, 236, 205, 0.20], mote: [255, 240, 210], glow: 0, sun: [255, 214, 140] },
+  { h: 19.6, top: "#3b4868", bot: "#e2a07e", far: "#7c6e80", near: "#2c2c39", mist: [240, 190, 170, 0.12], mote: [255, 225, 170], glow: 0.5, sun: [255, 170, 120] },
+  { h: 21.5, top: "#13202f", bot: "#2e3f52", far: "#3a4b5c", near: "#111b23", mist: [190, 205, 220, 0.07], mote: [255, 233, 160], glow: 1, sun: [220, 230, 240] },
+  { h: 24,   top: "#0e1a28", bot: "#26394a", far: "#34495a", near: "#0f1a21", mist: [190, 205, 220, 0.07], mote: [255, 233, 160], glow: 1, sun: [220, 230, 240] },
+];
+const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
+const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+const rgb = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+
+function sceneAt(hour) {
+  let i = 0;
+  while (SCENES[i + 1].h <= hour) i++;
+  const A = SCENES[i], B = SCENES[i + 1];
+  const t = (hour - A.h) / (B.h - A.h);
+  const st = t * t * (3 - 2 * t);
+  const m = (k) => mix(typeof A[k] === "string" ? hex(A[k]) : A[k], typeof B[k] === "string" ? hex(B[k]) : B[k], st);
+  return { top: m("top"), bot: m("bot"), far: m("far"), near: m("near"), mist: m("mist"), mote: m("mote"), sun: m("sun"), glow: A.glow + (B.glow - A.glow) * st };
+}
+
+function landscape() {
   const cv = $("#stars"), ctx = cv.getContext("2d");
+  const forced = Number(new URLSearchParams(location.search).get("hour"));
+  const hourNow = () => {
+    if (!Number.isNaN(forced) && new URLSearchParams(location.search).has("hour")) return forced % 24;
+    const d = new Date();
+    return d.getHours() + d.getMinutes() / 60;
+  };
   let W, H, dpr;
-  const stars = Array.from({ length: 320 }, () => ({ x: Math.random(), y: Math.random(), z: Math.random() * 0.9 + 0.1, tw: Math.random() * 6.28 }));
+  const rand = (seed) => () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const LAYERS = [0, 1, 2, 3, 4].map((i) => {
+    const r = rand(97 + i * 131);
+    const waves = Array.from({ length: 5 }, (_, k) => ({ f: (0.0009 + r() * 0.0016) * (k + 1) ** 1.25, a: (1 / (k + 1) ** 1.1) * (0.6 + r() * 0.8), p: r() * 6.28 }));
+    return { i, depth: 0.08 + i * 0.07, base: 0.5 + i * 0.09, amp: 0.05 + i * 0.022, waves };
+  });
+  const motes = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), z: 0.3 + Math.random() * 0.7, ph: Math.random() * 6.28, sp: 0.2 + Math.random() * 0.6 }));
+  const clouds = Array.from({ length: 6 }, (_, i) => ({ x: Math.random(), y: 0.08 + Math.random() * 0.3, w: 0.35 + Math.random() * 0.4, sp: 0.000004 + Math.random() * 0.000006, z: 0.03 + i * 0.01 }));
+  const sprite = document.createElement("canvas");
+  sprite.width = sprite.height = 64;
+  const sg = sprite.getContext("2d").createRadialGradient(32, 32, 0, 32, 32, 32);
+  sg.addColorStop(0, "rgba(255,255,255,1)"); sg.addColorStop(0.25, "rgba(255,255,255,.5)"); sg.addColorStop(1, "rgba(255,255,255,0)");
+  sprite.getContext("2d").fillStyle = sg;
+  sprite.getContext("2d").fillRect(0, 0, 64, 64);
+
   const resize = () => {
-    dpr = Math.min(2, devicePixelRatio || 1);
-    W = cv.width = innerWidth * dpr; H = cv.height = innerHeight * dpr;
+    dpr = Math.min(1.5, devicePixelRatio || 1);
+    W = cv.width = Math.round(innerWidth * dpr); H = cv.height = Math.round(innerHeight * dpr);
   };
   resize();
   addEventListener("resize", resize);
-  let prev = { ...state.cam };
+
+  let scene = sceneAt(hourNow()), sceneT = 0;
   const frame = (now) => {
+    if (now - sceneT > 30000) { scene = sceneAt(hourNow()); sceneT = now; document.body.classList.toggle("night", scene.glow > 0.5); }
     const c = state.cam;
-    const vx = c.x - prev.x, vy = c.y - prev.y, vs = Math.log(c.s / prev.s);
-    prev = { ...c };
-    ctx.clearRect(0, 0, W, H);
-    const speed = Math.min(1, Math.hypot(vx, vy) / 60 + Math.abs(vs) * 8);
-    for (const s of stars) {
-      const par = s.z * 0.18 * (0.5 + c.s * 0.5);
-      let x = ((s.x * W - c.x * par * dpr) % W + W) % W;
-      let y = ((s.y * H - c.y * par * dpr) % H + H) % H;
-      const a = 0.25 + 0.55 * s.z * (0.6 + 0.4 * Math.sin(now / 900 + s.tw));
-      const size = s.z * 1.6 * dpr;
-      if (speed > 0.05) {
-        // warp streaks during flight
-        ctx.strokeStyle = `rgba(150,235,255,${a})`;
-        ctx.lineWidth = size;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + vx * par * dpr * 3 + (x - W / 2) * vs * 0.6, y + vy * par * dpr * 3 + (y - H / 2) * vs * 0.6);
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = `rgba(180,235,255,${a})`;
-        ctx.fillRect(x, y, size, size);
+    const rise = Math.max(-1.6, Math.min(0.4, Math.log(c.s))); // zooming out = floating up
+    // sky
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, rgb(scene.top)); g.addColorStop(0.75, rgb(scene.bot)); g.addColorStop(1, rgb(scene.bot));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // night stars, faint
+    if (scene.glow > 0.2) {
+      for (let i = 0; i < 90; i++) {
+        const sx = ((i * 7919) % 1000) / 1000 * W, sy = ((i * 104729) % 1000) / 1000 * H * 0.55;
+        const tw = 0.5 + 0.5 * Math.sin(now / 1800 + i);
+        ctx.fillStyle = `rgba(255,255,245,${0.5 * scene.glow * tw})`;
+        ctx.fillRect(sx, sy, 1.3 * dpr, 1.3 * dpr);
       }
     }
+    // sun or moon
+    const hr = hourNow();
+    const arc = scene.glow > 0.5 ? ((hr + 6) % 24) / 12 : (hr - 6) / 12;
+    const sunX = W * (0.15 + 0.7 * Math.min(1, Math.max(0, arc)));
+    const sunY = H * (0.62 - 0.45 * Math.sin(Math.PI * Math.min(1, Math.max(0, arc)))) - rise * H * 0.06;
+    const sr = Math.min(W, H) * 0.05;
+    const halo = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sr * 9);
+    halo.addColorStop(0, rgb(scene.sun, 0.55)); halo.addColorStop(0.15, rgb(scene.sun, 0.22)); halo.addColorStop(1, rgb(scene.sun, 0));
+    ctx.fillStyle = halo; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = rgb(mix(scene.sun, [255, 255, 255], 0.5), 0.95);
+    ctx.beginPath(); ctx.arc(sunX, sunY, sr, 0, 6.29); ctx.fill();
+    // clouds
+    for (const cl of clouds) {
+      const cx = (((cl.x + now * cl.sp - c.x * cl.z * 0.0002) % 1.4) + 1.4) % 1.4 - 0.2;
+      ctx.globalAlpha = scene.mist[3] * 1.6;
+      ctx.drawImage(sprite, cx * W, (cl.y - rise * 0.02) * H, cl.w * W, cl.w * W * 0.18);
+    }
+    ctx.globalAlpha = 1;
+    // hills, far to near, each softened by mist
+    for (const L of LAYERS) {
+      const col = mix(scene.far, scene.near, L.i / 4);
+      const off = c.x * L.depth * 0.35;
+      const baseY = H * (L.base - rise * L.depth * 0.5) - c.y * L.depth * 0.12 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(0, H);
+      for (let x = 0; x <= W + 8; x += 8) {
+        const wx = (x / dpr + off) * (1 + L.i * 0.15);
+        let h = 0;
+        for (const w of L.waves) h += Math.sin(wx * w.f + w.p) * w.a;
+        ctx.lineTo(x, baseY - h * H * L.amp);
+      }
+      ctx.lineTo(W, H);
+      ctx.fillStyle = rgb(col);
+      ctx.fill();
+      if (L.i < 4) {
+        const mg = ctx.createLinearGradient(0, baseY - H * 0.12, 0, baseY + H * 0.18);
+        mg.addColorStop(0, rgb(scene.mist, 0)); mg.addColorStop(0.6, rgb(scene.mist, scene.mist[3] * 2.4)); mg.addColorStop(1, rgb(scene.mist, scene.mist[3] * 1.2));
+        ctx.fillStyle = mg;
+        ctx.fillRect(0, baseY - H * 0.12, W, H * 0.4);
+      }
+    }
+    // motes: pollen by day, fireflies by night
+    for (const m of motes) {
+      m.y -= m.sp * 0.00012; if (m.y < -0.05) m.y = 1.05;
+      const x = ((m.x * W + Math.sin(now / 2600 + m.ph) * 30 * dpr - c.x * m.z * 0.25 * dpr) % W + W) % W;
+      const y = ((m.y * H - c.y * m.z * 0.15 * dpr) % H + H) % H;
+      const pulse = scene.glow > 0.3 ? 0.5 + 0.5 * Math.sin(now / 700 + m.ph * 3) : 0.7;
+      const size = (scene.glow > 0.3 ? 14 : 6) * m.z * dpr;
+      ctx.globalAlpha = (scene.glow > 0.3 ? 0.9 : 0.45) * pulse * m.z;
+      ctx.drawImage(sprite, x - size / 2, y - size / 2, size, size);
+    }
+    ctx.globalAlpha = 1;
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
@@ -873,7 +959,7 @@ addEventListener("resize", () => {
 
 async function boot() {
   measure();
-  starfield();
+  landscape();
   overviewControls();
   voice();
   tickClock();
@@ -882,7 +968,7 @@ async function boot() {
     const s = await api("/api/status");
     const st = $("#status");
     st.classList.toggle("live", s.live);
-    $(".status-text", st).textContent = s.live ? `${s.model.replace("claude-", "")} · online` : "demo mode";
+    $(".status-text", st).textContent = s.live ? "Here" : "Demo";
     st.title = s.live ? `Model ${s.model}, effort ${s.effort}. Context files: ${s.contextFiles.join(", ") || "none"}` : "No API key — replies are canned. See README.";
   } catch {}
   const list = await refreshThreadList();

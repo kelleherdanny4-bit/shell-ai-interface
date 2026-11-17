@@ -129,7 +129,7 @@ ${userText.split("\n").map((l) => `> ${l}`).join("\n")}
 
 1. Get an API key at **console.anthropic.com** (it's billed separately from your Claude plan).
 2. Start the server with it:  \`ANTHROPIC_API_KEY=sk-ant-... npm start\`
-3. Reload this page. The status light in the top right turns cyan.
+3. Reload this page. The light in the top right turns green.
 
 ${reason ? `*Why demo mode:* ${reason}` : ""}
 
