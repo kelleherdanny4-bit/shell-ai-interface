@@ -217,6 +217,7 @@ function makeDoc(d) {
   el.innerHTML = `
     <div class="doc-head"><span class="idx"></span><span class="time">${fmtTime(d.at)}</span><span class="spacer"></span><span class="prompt" title="">${headPrompt(d.user)}</span></div>
     <div class="doc-scroll"><div class="doc-body"></div></div>
+    <div class="inscription"><span class="date"></span><span class="ed"></span></div>
     <div class="pad" aria-hidden="true"><span class="lily"></span><span class="pad-title"></span></div>`;
   d.el = el;
   setPadTitle(d);
@@ -235,8 +236,21 @@ function setPadTitle(d) {
   $(".pad-title", d.el).textContent = d.title && d.title !== "…" ? d.title : "Writing…";
 }
 
+// Like a print's pencilled margin: the date, and its place in the series.
+function pencilDate(ts) {
+  const d = new Date(ts || Date.now());
+  const day = d.getDate();
+  const suf = day % 10 === 1 && day !== 11 ? "st" : day % 10 === 2 && day !== 12 ? "nd" : day % 10 === 3 && day !== 13 ? "rd" : "th";
+  return `${d.toLocaleString("en-US", { month: "short" })}. ${day}${suf} ’${String(d.getFullYear()).slice(2)}`;
+}
+
 function renumber() {
-  state.docs.forEach((d, i) => ($(".idx", d.el).textContent = `Doc ${i + 1}`));
+  const n = state.docs.length;
+  state.docs.forEach((d, i) => {
+    $(".idx", d.el).textContent = `Doc ${i + 1}`;
+    $(".inscription .date", d.el).textContent = pencilDate(d.at);
+    $(".inscription .ed", d.el).textContent = `${i + 1}/${n}`;
+  });
 }
 
 function renderBody(d, { animate = true } = {}) {
@@ -754,19 +768,78 @@ function autoGrow() {
   input.style.height = Math.min(input.scrollHeight, innerHeight * 0.3) + "px";
 }
 
-// ---------------------------------------------------------------- landscape
-// A living backdrop: sky, sun or moon, layered hills, drifting mist and motes.
-// It follows the real time of day (try ?hour=19 to preview dusk).
+// ---------------------------------------------------------------- printmaking textures
+// Everything is printed on paper: handmade-paper fibres, woodgrain from the
+// block, halftone dots for the sky. Textures are drawn once, then reused.
 
+const rnd = (seed) => () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+
+function makeGrain(size = 512, seed = 11) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+  const r = rnd(seed);
+  // Long wavy fibres of a woodblock, tiling seamlessly in both directions.
+  for (let i = 0; i < 170; i++) {
+    const y0 = r() * size, a = 1 + r() * 7, k = 1 + Math.floor(r() * 3), p = r() * 6.28;
+    const dark = r() < 0.72;
+    g.strokeStyle = dark ? `rgba(60,45,30,${0.05 + r() * 0.11})` : `rgba(255,255,255,${0.08 + r() * 0.14})`;
+    g.lineWidth = 0.4 + r() * 1.8;
+    for (const dy of [-size, 0, size]) {
+      g.beginPath();
+      for (let x = 0; x <= size; x += 4) {
+        const y = y0 + dy + Math.sin((x / size) * Math.PI * 2 * k + p) * a + Math.sin((x / size) * Math.PI * 2 * (k + 3) + p * 2) * a * 0.3;
+        x ? g.lineTo(x, y) : g.moveTo(x, y);
+      }
+      g.stroke();
+    }
+  }
+  return c;
+}
+
+function makeWashi(size = 384, seed = 7) {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+  const r = rnd(seed);
+  // Speckle
+  for (let i = 0; i < 2600; i++) {
+    g.fillStyle = r() < 0.5 ? `rgba(120,100,70,${r() * 0.07})` : `rgba(255,255,250,${r() * 0.25})`;
+    g.fillRect(r() * size, r() * size, 1, 1);
+  }
+  // Fibres: short curls, some light, some a touch darker
+  for (let i = 0; i < 230; i++) {
+    const x = r() * size, y = r() * size, len = 6 + r() * 26, ang = r() * 6.28, bend = (r() - 0.5) * 0.9;
+    g.strokeStyle = r() < 0.65 ? `rgba(255,255,248,${0.25 + r() * 0.35})` : `rgba(140,115,80,${0.05 + r() * 0.08})`;
+    g.lineWidth = 0.3 + r() * 0.8;
+    for (const ox of [-size, 0, size]) for (const oy of [-size, 0, size]) {
+      g.beginPath();
+      g.moveTo(x + ox, y + oy);
+      g.quadraticCurveTo(x + ox + Math.cos(ang + bend) * len * 0.6, y + oy + Math.sin(ang + bend) * len * 0.6, x + ox + Math.cos(ang) * len, y + oy + Math.sin(ang) * len);
+      g.stroke();
+    }
+  }
+  return c;
+}
+
+const TEX = { grain: makeGrain(), washi: makeWashi() };
+document.documentElement.style.setProperty("--grain", `url(${TEX.grain.toDataURL()})`);
+document.documentElement.style.setProperty("--washi", `url(${TEX.washi.toDataURL()})`);
+
+// ---------------------------------------------------------------- landscape
+// A printed landscape that follows the real time of day (?hour=19 previews dusk).
+// Halftone sky, flat woodblock hills printed a hair out of register, a red sun.
+
+const PAPER = [239, 233, 219];
 const SCENES = [
-  { h: 0,    top: "#0e1a28", bot: "#26394a", far: "#34495a", near: "#0f1a21", mist: [190, 205, 220, 0.07], mote: [255, 233, 160], glow: 1, sun: [220, 230, 240] },
-  { h: 5.5,  top: "#2a3753", bot: "#b98c84", far: "#6c6f80", near: "#252a33", mist: [230, 200, 190, 0.10], mote: [255, 233, 180], glow: 0.6, sun: [255, 214, 170] },
-  { h: 7.5,  top: "#9db6cc", bot: "#f5d6b4", far: "#a9b5c0", near: "#4a5c55", mist: [255, 240, 225, 0.22], mote: [255, 250, 235], glow: 0, sun: [255, 226, 170] },
-  { h: 12,   top: "#a6c8d8", bot: "#eef0e3", far: "#b5c8c3", near: "#55705a", mist: [250, 252, 248, 0.20], mote: [255, 255, 250], glow: 0, sun: [255, 248, 225] },
-  { h: 17.5, top: "#93b2c6", bot: "#f6d9a8", far: "#c2b8a6", near: "#58593f", mist: [255, 236, 205, 0.20], mote: [255, 240, 210], glow: 0, sun: [255, 214, 140] },
-  { h: 19.6, top: "#3b4868", bot: "#e2a07e", far: "#7c6e80", near: "#2c2c39", mist: [240, 190, 170, 0.12], mote: [255, 225, 170], glow: 0.5, sun: [255, 170, 120] },
-  { h: 21.5, top: "#13202f", bot: "#2e3f52", far: "#3a4b5c", near: "#111b23", mist: [190, 205, 220, 0.07], mote: [255, 233, 160], glow: 1, sun: [220, 230, 240] },
-  { h: 24,   top: "#0e1a28", bot: "#26394a", far: "#34495a", near: "#0f1a21", mist: [190, 205, 220, 0.07], mote: [255, 233, 160], glow: 1, sun: [220, 230, 240] },
+  { h: 0,    ink: "#2d3b55", dens: 0.82, far: "#6b7688", near: "#2c3444", sun: "#efe5cc", sun2: "#b9c2cf", meadow: "#5d6b5a" },
+  { h: 5.5,  ink: "#6d5a78", dens: 0.55, far: "#a596a3", near: "#4b4a58", sun: "#e0866a", sun2: "#e9b9b1", meadow: "#8a9575" },
+  { h: 7.5,  ink: "#b88a83", dens: 0.32, far: "#cdbdb3", near: "#7a8669", sun: "#d8573f", sun2: "#ecb3a6", meadow: "#a8b68a" },
+  { h: 12,   ink: "#7b9cb0", dens: 0.24, far: "#bccab9", near: "#7f9b6b", sun: "#d45138", sun2: "#e9b3ab", meadow: "#a9bd8b" },
+  { h: 17.5, ink: "#c0905a", dens: 0.34, far: "#d5c29e", near: "#868157", sun: "#cf5132", sun2: "#e7b48c", meadow: "#b0b37f" },
+  { h: 19.6, ink: "#5e5478", dens: 0.6,  far: "#a68ea0", near: "#40394f", sun: "#e17656", sun2: "#e7b2a8", meadow: "#7d7f6a" },
+  { h: 21.5, ink: "#2f3d57", dens: 0.8,  far: "#6c788a", near: "#2d3545", sun: "#efe5cc", sun2: "#b9c2cf", meadow: "#5f6d5b" },
+  { h: 24,   ink: "#2d3b55", dens: 0.82, far: "#6b7688", near: "#2c3444", sun: "#efe5cc", sun2: "#b9c2cf", meadow: "#5d6b5a" },
 ];
 const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16));
 const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
@@ -778,134 +851,144 @@ function sceneAt(hour) {
   const A = SCENES[i], B = SCENES[i + 1];
   const t = (hour - A.h) / (B.h - A.h);
   const st = t * t * (3 - 2 * t);
-  const m = (k) => mix(typeof A[k] === "string" ? hex(A[k]) : A[k], typeof B[k] === "string" ? hex(B[k]) : B[k], st);
-  return { top: m("top"), bot: m("bot"), far: m("far"), near: m("near"), mist: m("mist"), mote: m("mote"), sun: m("sun"), glow: A.glow + (B.glow - A.glow) * st };
+  const m = (k) => mix(hex(A[k]), hex(B[k]), st);
+  return { ink: m("ink"), far: m("far"), near: m("near"), sun: m("sun"), sun2: m("sun2"), meadow: m("meadow"), dens: A.dens + (B.dens - A.dens) * st };
 }
 
 function landscape() {
   const cv = $("#stars"), ctx = cv.getContext("2d");
-  const forced = Number(new URLSearchParams(location.search).get("hour"));
+  const params = new URLSearchParams(location.search);
   const hourNow = () => {
-    if (!Number.isNaN(forced) && new URLSearchParams(location.search).has("hour")) return forced % 24;
+    if (params.has("hour")) return Number(params.get("hour")) % 24;
     const d = new Date();
     return d.getHours() + d.getMinutes() / 60;
   };
-  let W, H, dpr;
-  const rand = (seed) => () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  const LAYERS = [0, 1, 2, 3, 4].map((i) => {
-    const r = rand(97 + i * 131);
-    const waves = Array.from({ length: 5 }, (_, k) => ({ f: (0.0009 + r() * 0.0016) * (k + 1) ** 1.25, a: (1 / (k + 1) ** 1.1) * (0.6 + r() * 0.8), p: r() * 6.28 }));
-    return { i, depth: 0.08 + i * 0.07, base: 0.5 + i * 0.09, amp: 0.05 + i * 0.022, waves };
+  let W, H, dpr, sky = null, scene = sceneAt(hourNow()), sceneT = -Infinity, grainPat, washiPat;
+  const LAYERS = [0, 1, 2, 3].map((i) => {
+    const r = rnd(97 + i * 131);
+    const waves = Array.from({ length: 4 }, (_, k) => ({ f: (0.0008 + r() * 0.0013) * (k + 1) ** 1.3, a: (1 / (k + 1) ** 1.05) * (0.6 + r() * 0.8), p: r() * 6.28 }));
+    return { i, depth: 0.09 + i * 0.09, base: 0.56 + i * 0.11, amp: 0.05 + i * 0.025, waves };
   });
-  const motes = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), z: 0.3 + Math.random() * 0.7, ph: Math.random() * 6.28, sp: 0.2 + Math.random() * 0.6 }));
-  const clouds = Array.from({ length: 6 }, (_, i) => ({ x: Math.random(), y: 0.08 + Math.random() * 0.3, w: 0.35 + Math.random() * 0.4, sp: 0.000004 + Math.random() * 0.000006, z: 0.03 + i * 0.01 }));
-  const sprite = document.createElement("canvas");
-  sprite.width = sprite.height = 64;
-  const sg = sprite.getContext("2d").createRadialGradient(32, 32, 0, 32, 32, 32);
-  sg.addColorStop(0, "rgba(255,255,255,1)"); sg.addColorStop(0.25, "rgba(255,255,255,.5)"); sg.addColorStop(1, "rgba(255,255,255,0)");
-  sprite.getContext("2d").fillStyle = sg;
-  sprite.getContext("2d").fillRect(0, 0, 64, 64);
+
+  const sunPos = () => {
+    const hr = hourNow();
+    const night = scene.dens > 0.6;
+    const arc = Math.min(1, Math.max(0, night ? ((hr + 6) % 24) / 12 : (hr - 6) / 12));
+    return { x: W * (0.18 + 0.64 * arc), y: H * (0.5 - 0.32 * Math.sin(Math.PI * arc)), r: Math.min(W, H) * 0.075 };
+  };
+
+  // The halftone sky is printed once per scene/size: dots grow where the sky is darker.
+  function printSky() {
+    sky = document.createElement("canvas");
+    sky.width = W; sky.height = H;
+    const g = sky.getContext("2d");
+    g.fillStyle = rgb(PAPER); g.fillRect(0, 0, W, H);
+    const step = 7 * dpr, sp = sunPos();
+    g.fillStyle = rgb(scene.ink, 0.9);
+    for (let row = 0, y = 0; y < H * 0.85; row++, y += step * 0.87) {
+      for (let x = (row % 2) * step / 2; x < W; x += step) {
+        const fall = 1 - y / (H * 0.85);                       // darker toward the top
+        const dSun = Math.hypot(x - sp.x, y - sp.y) / (sp.r * 5);
+        let v = scene.dens * (0.35 + 0.65 * fall) - Math.max(0, 1 - dSun) * 0.35;
+        v += (Math.sin(x * 0.004 + y * 0.011) + Math.sin(x * 0.0021 - y * 0.007)) * 0.04; // a cloud's breath
+        if (v <= 0.02) continue;
+        g.beginPath();
+        g.arc(x, y, (step / 2) * Math.sqrt(Math.min(1, v)), 0, 6.283);
+        g.fill();
+      }
+    }
+  }
 
   const resize = () => {
     dpr = Math.min(1.5, devicePixelRatio || 1);
     W = cv.width = Math.round(innerWidth * dpr); H = cv.height = Math.round(innerHeight * dpr);
+    grainPat = ctx.createPattern(TEX.grain, "repeat");
+    washiPat = ctx.createPattern(TEX.washi, "repeat");
+    printSky();
   };
   resize();
   addEventListener("resize", resize);
 
-  let scene = sceneAt(hourNow()), sceneT = -Infinity;
+  const hill = (L, ox, oy, c) => {
+    const off = c.x * L.depth * 0.35 + ox;
+    const rise = Math.max(-1.6, Math.min(0.4, Math.log(c.s)));
+    const baseY = H * (L.base - rise * L.depth * 0.45) - c.y * L.depth * 0.12 * dpr + oy;
+    ctx.beginPath();
+    ctx.moveTo(-10, H + 10);
+    for (let x = -10; x <= W + 12; x += 10) {
+      const wx = (x / dpr + off) * (1 + L.i * 0.12);
+      let h = 0;
+      for (const w of L.waves) h += Math.sin(wx * w.f + w.p) * w.a;
+      ctx.lineTo(x, baseY - h * H * L.amp);
+    }
+    ctx.lineTo(W + 10, H + 10);
+    ctx.closePath();
+  };
+
   const frame = (now) => {
     if (now - sceneT > 30000) {
-      scene = sceneAt(hourNow()); sceneT = now;
-      document.body.classList.toggle("night", scene.glow > 0.5);
+      const next = sceneAt(hourNow());
+      const changed = !sky || Math.abs(next.dens - scene.dens) > 0.01 || next.ink.some((v, i) => Math.abs(v - scene.ink[i]) > 2);
+      scene = next; sceneT = now;
+      if (changed) printSky();
+      document.body.classList.toggle("night", scene.dens > 0.6);
       const rs = document.documentElement.style;
-      rs.setProperty("--water-a", rgb(mix(scene.top, [96, 160, 168], 0.55)));
-      rs.setProperty("--water-b", rgb(mix(scene.bot, [70, 128, 140], 0.6)));
-      rs.setProperty("--bank", rgb(mix(scene.near, [60, 90, 55], 0.4)));
+      // Water is always a pale printed blue, just dimmed a little at night.
+      rs.setProperty("--water-a", rgb(mix([150, 182, 198], [52, 66, 92], Math.max(0, scene.dens - 0.3) * 0.6)));
+      rs.setProperty("--water-b", rgb(mix([136, 170, 188], [48, 62, 88], Math.max(0, scene.dens - 0.3) * 0.6)));
+      rs.setProperty("--bank", rgb(mix(scene.ink, [70, 90, 110], 0.5)));
     }
+    const c = state.cam;
     const want = state.view === "river" || document.body.classList.contains("far") ? 1 : 0;
     state.riverness += (want - state.riverness) * 0.05;
-    const c = state.cam;
-    const rise = Math.max(-1.6, Math.min(0.4, Math.log(c.s))); // zooming out = floating up
-    // sky
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, rgb(scene.top)); g.addColorStop(0.75, rgb(scene.bot)); g.addColorStop(1, rgb(scene.bot));
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    // night stars, faint
-    if (scene.glow > 0.2) {
-      for (let i = 0; i < 90; i++) {
-        const sx = ((i * 7919) % 1000) / 1000 * W, sy = ((i * 104729) % 1000) / 1000 * H * 0.55;
-        const tw = 0.5 + 0.5 * Math.sin(now / 1800 + i);
-        ctx.fillStyle = `rgba(255,255,245,${0.5 * scene.glow * tw})`;
-        ctx.fillRect(sx, sy, 1.3 * dpr, 1.3 * dpr);
-      }
-    }
-    // sun or moon
-    const hr = hourNow();
-    const arc = scene.glow > 0.5 ? ((hr + 6) % 24) / 12 : (hr - 6) / 12;
-    const sunX = W * (0.15 + 0.7 * Math.min(1, Math.max(0, arc)));
-    const sunY = H * (0.62 - 0.45 * Math.sin(Math.PI * Math.min(1, Math.max(0, arc)))) - rise * H * 0.06;
-    const sr = Math.min(W, H) * 0.05;
-    const halo = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sr * 9);
-    halo.addColorStop(0, rgb(scene.sun, 0.55)); halo.addColorStop(0.15, rgb(scene.sun, 0.22)); halo.addColorStop(1, rgb(scene.sun, 0));
-    ctx.fillStyle = halo; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = rgb(mix(scene.sun, [255, 255, 255], 0.5), 0.95);
-    ctx.beginPath(); ctx.arc(sunX, sunY, sr, 0, 6.29); ctx.fill();
-    // clouds
-    for (const cl of clouds) {
-      const cx = (((cl.x + now * cl.sp - c.x * cl.z * 0.0002) % 1.4) + 1.4) % 1.4 - 0.2;
-      ctx.globalAlpha = scene.mist[3] * 1.6;
-      ctx.drawImage(sprite, cx * W, (cl.y - rise * 0.02) * H, cl.w * W, cl.w * W * 0.18);
-    }
-    ctx.globalAlpha = 1;
-    // hills, far to near, each softened by mist
+
+    ctx.drawImage(sky, 0, 0);
+    // The sun: a flat disc, printed twice a little out of register.
+    const sp = sunPos();
+    const lift = Math.max(-1.6, Math.min(0.4, Math.log(c.s))) * H * 0.05;
+    ctx.fillStyle = rgb(scene.sun2, 0.85);
+    ctx.beginPath(); ctx.arc(sp.x + 5 * dpr, sp.y - lift + 3 * dpr, sp.r, 0, 6.283); ctx.fill();
+    ctx.fillStyle = rgb(scene.sun);
+    ctx.beginPath(); ctx.arc(sp.x, sp.y - lift, sp.r, 0, 6.283); ctx.fill();
+
+    // Hills: flat colour + woodgrain, each with a faint second pass offset.
     for (const L of LAYERS) {
-      const col = mix(scene.far, scene.near, L.i / 4);
-      const off = c.x * L.depth * 0.35;
-      const baseY = H * (L.base - rise * L.depth * 0.5) - c.y * L.depth * 0.12 * dpr;
-      ctx.beginPath();
-      ctx.moveTo(0, H);
-      for (let x = 0; x <= W + 8; x += 8) {
-        const wx = (x / dpr + off) * (1 + L.i * 0.15);
-        let h = 0;
-        for (const w of L.waves) h += Math.sin(wx * w.f + w.p) * w.a;
-        ctx.lineTo(x, baseY - h * H * L.amp);
-      }
-      ctx.lineTo(W, H);
+      const col = mix(scene.far, scene.near, L.i / 3);
+      hill(L, 6, -4 * dpr, c);
+      ctx.fillStyle = rgb(mix(col, scene.ink, 0.25), 0.35);
+      ctx.fill();
+      hill(L, 0, 0, c);
       ctx.fillStyle = rgb(col);
       ctx.fill();
-      if (L.i < 4) {
-        const mg = ctx.createLinearGradient(0, baseY - H * 0.12, 0, baseY + H * 0.18);
-        mg.addColorStop(0, rgb(scene.mist, 0)); mg.addColorStop(0.6, rgb(scene.mist, scene.mist[3] * 2.4)); mg.addColorStop(1, rgb(scene.mist, scene.mist[3] * 1.2));
-        ctx.fillStyle = mg;
-        ctx.fillRect(0, baseY - H * 0.12, W, H * 0.4);
-      }
+      ctx.save();
+      ctx.globalCompositeOperation = "multiply";
+      ctx.globalAlpha = 0.55;
+      ctx.translate((-c.x * L.depth * 0.35 * dpr) % 512, L.i * 97);
+      ctx.fillStyle = grainPat;
+      ctx.fill();
+      ctx.restore();
     }
-    // zoomed out: the hills give way to a meadow seen from above
+
+    // Zoomed out: a flat meadow block printed over everything, seen from above.
     if (state.riverness > 0.01) {
-      const meadow = mix(scene.near, [126, 156, 98], scene.glow > 0.5 ? 0.25 : 0.6);
-      const mg = ctx.createRadialGradient(W * 0.5, H * 0.45, 0, W * 0.5, H * 0.5, Math.max(W, H) * 0.75);
-      mg.addColorStop(0, rgb(mix(meadow, [255, 250, 220], 0.12), state.riverness));
-      mg.addColorStop(1, rgb(mix(meadow, [20, 40, 20], 0.25), state.riverness));
-      ctx.fillStyle = mg; ctx.fillRect(0, 0, W, H);
-      ctx.globalAlpha = 0.18 * state.riverness;
-      for (let i = 0; i < 14; i++) {
-        const bx = (((i * 0.6180339) % 1) * W - c.x * 0.02 * dpr) % W, by = (((i * 0.4142135) % 1) * H);
-        ctx.drawImage(sprite, bx - W * 0.15, by - W * 0.08, W * 0.3, W * 0.16);
-      }
-      ctx.globalAlpha = 1;
+      ctx.save();
+      ctx.globalAlpha = state.riverness;
+      // Seen from above, the land is bare paper: lots of quiet empty space.
+      ctx.fillStyle = rgb(mix(PAPER, scene.ink, scene.dens * 0.45));
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = "multiply";
+      ctx.globalAlpha = state.riverness * 0.12;
+      ctx.fillStyle = grainPat;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
     }
-    // motes: pollen by day, fireflies by night
-    for (const m of motes) {
-      m.y -= m.sp * 0.00012; if (m.y < -0.05) m.y = 1.05;
-      const x = ((m.x * W + Math.sin(now / 2600 + m.ph) * 30 * dpr - c.x * m.z * 0.25 * dpr) % W + W) % W;
-      const y = ((m.y * H - c.y * m.z * 0.15 * dpr) % H + H) % H;
-      const pulse = scene.glow > 0.3 ? 0.5 + 0.5 * Math.sin(now / 700 + m.ph * 3) : 0.7;
-      const size = (scene.glow > 0.3 ? 14 : 6) * m.z * dpr;
-      ctx.globalAlpha = (scene.glow > 0.3 ? 0.9 : 0.45) * pulse * m.z;
-      ctx.drawImage(sprite, x - size / 2, y - size / 2, size, size);
-    }
-    ctx.globalAlpha = 1;
+
+    // Paper fibres over the whole print
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = washiPat;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
@@ -943,12 +1026,15 @@ function renderRiver() {
   $("#river-svg").setAttribute("width", g.W);
   $("#river-svg").setAttribute("height", g.H);
   $("#river-svg").innerHTML = `
+    <defs><pattern id="grainpat" patternUnits="userSpaceOnUse" width="512" height="512"><image href="${TEX.grain.toDataURL()}" width="512" height="512" /></pattern></defs>
     <path class="bank" d="${pathD}" />
     <path class="water" d="${pathD}" />
+    <path class="grainline" d="${pathD}" />
     <path class="shimmer" d="${pathD}" />
     <path class="shimmer two" d="${pathD}" />
     <ellipse class="bank" cx="${pcx}" cy="${pcy}" rx="${g.pond.rx + 30}" ry="${g.pond.ry + 30}" />
     <ellipse class="water" cx="${pcx}" cy="${pcy}" rx="${g.pond.rx}" ry="${g.pond.ry}" />
+    <ellipse class="grainfill" cx="${pcx}" cy="${pcy}" rx="${g.pond.rx}" ry="${g.pond.ry}" />
     <ellipse class="shimmer" cx="${pcx}" cy="${pcy}" rx="${g.pond.rx * 0.8}" ry="${g.pond.ry * 0.7}" />`;
 
   const pads = $("#pads");
