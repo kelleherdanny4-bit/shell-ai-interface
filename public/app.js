@@ -1,6 +1,8 @@
 // Shell — client.
-// A canvas of documents. Claude's replies land as docs; the camera flies
-// between them. Select text to leave notes; notes go back in one batch.
+// A chat in a printed sky. Your words float in the blue in white letters;
+// Claude's replies arrive as clouds you can mark up. Zoom out (O) and this
+// project's chats become clouds, newest first; zoom out again and every
+// project is a cloud. One world, one camera.
 import { marked } from "/vendor/marked.js";
 import DOMPurify from "/vendor/purify.js";
 
@@ -8,91 +10,46 @@ marked.setOptions({ gfm: true, breaks: false });
 
 const $ = (s, el = document) => el.querySelector(s);
 const world = $("#world");
-const docsEl = $("#docs");
-const linksEl = $("#links");
+const viewportEl = $("#viewport");
+const chatEl = $("#chat");
+const feed = $("#feed");
+const spacer = $("#spacer");
+const mapEl = $("#map");
+const skyEl = $("#sky");
 const input = $("#input");
 const pop = $("#popover");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const HL_SUPPORTED = typeof CSS !== "undefined" && "highlights" in CSS;
 
 const state = {
-  thread: null,
-  docs: [], // {id, text, title, user, el, bodyEl, scrollEl, local, streaming, at}
-  focus: -1,
-  overview: false,
-  busy: false,
-  notes: [], // pending notes for this thread
-  view: "thread", // "thread" (docs) or "sky" (all projects)
+  thread: null, // {id (null until the first message), projectId, title, turns}
+  msgs: [], // Claude's replies in this chat: {id, text, title, at, el, bodyEl, marginEl, streaming}
+  notes: [], // pending notes for this chat
+  view: "chat", // "chat" | "chats" (this project's chats as clouds) | "sky" (every project)
+  chatK: 0, // 1 = down in a chat, 0 = up among the clouds
+  night: false,
   projects: [],
   projectId: null,
-  cam: { x: 0, y: 0, s: 1, r: 0 },
-  layout: { docW: 820, docH: 600, cx: 0, cy: 0, wide: true },
+  busy: false,
+  cam: { x: 0, y: 0, s: 1.1, r: 0 },
+  layout: { cx: 0, cy: 0 },
 };
 
 // ---------------------------------------------------------------- layout
 
-const ROT = [0, -2.5, 2, -1.5, 3, -2, 1.5];
-
 function measure() {
   const vw = innerWidth, vh = innerHeight;
-  const wide = vw >= 1200;
+  const wide = vw >= 1280; // room for pencil notes in the sky beside each cloud
   document.body.classList.toggle("wide", wide);
-  const topH = vw <= 760 ? 54 : 60;
-  // Reserve room for the "notes ready" chip so the doc never sits under it.
-  const composerH = Math.round($(".composer-row").getBoundingClientRect().height + ($("#composer-meta").offsetHeight || 0)) + 64;
-  document.documentElement.style.setProperty("--composer-h", composerH + "px");
-  // On wide screens your notes are pencilled in the margin right of the sheet.
-  const margW = 250;
-  const avail = wide ? vw - margW - 120 : vw <= 760 ? vw - 24 : vw - 140;
-  const docW = Math.round(Math.max(300, Math.min(820, avail)));
-  const docH = Math.round(Math.max(320, vh - topH - composerH - 16));
-  // Centre the sheet when there's room; otherwise slide it left to keep the margin.
-  const cx = Math.round(wide ? Math.min(vw / 2, vw - margW - 44 - docW / 2) : vw / 2);
-  document.documentElement.style.setProperty("--cx", cx + "px");
-  const cy = Math.round(topH + (vh - topH - composerH) / 2 + 4);
-  Object.assign(state.layout, { vw, vh, wide, topH, composerH, docW, docH, cx, cy });
-  document.documentElement.style.setProperty("--doc-h", docH + "px");
-  document.documentElement.style.setProperty("--doc-w", docW + "px");
+  const topH = vw <= 760 ? 56 : 60;
+  Object.assign(state.layout, { vw, vh, wide, topH, cx: Math.round(vw / 2), cy: Math.round(topH + (vh - topH) / 2) });
+  measureComposer();
 }
 
-function docPos(i) {
-  const { docW, docH } = state.layout;
-  const spacing = docW + Math.max(260, docW * 0.55);
-  return {
-    x: Math.round(i * spacing),
-    y: Math.round(Math.sin(i * 1.15) * docH * 0.6 + (i % 2 ? docH * 0.15 : 0)),
-    r: reduceMotion ? 0 : ROT[i % ROT.length],
-  };
-}
-
-function placeDocs() {
-  const { docW, docH } = state.layout;
-  state.docs.forEach((d, i) => {
-    const p = docPos(i);
-    d.pos = p;
-    d.el.style.left = p.x - docW / 2 + "px";
-    d.el.style.top = p.y - docH / 2 + "px";
-    d.el.style.transform = `rotate(${p.r}deg)`;
-    d.el.style.setProperty("--rot", p.r + "deg");
-  });
-  drawLinks();
-  buildSky();
-}
-
-// A pencil line joins one doc to the next.
-function drawLinks() {
-  const O = 20000;
-  const pts = state.docs.map((d) => [d.pos.x + O, d.pos.y + O]);
-  let path = "";
-  pts.forEach(([x, y], i) => {
-    if (i === 0) path += `M${x},${y}`;
-    else {
-      const [px, py] = pts[i - 1];
-      const mx = (px + x) / 2;
-      path += ` C${mx},${py} ${mx},${y} ${x},${y}`;
-    }
-  });
-  linksEl.innerHTML = `<path class="trail" d="${path}" />`;
+function measureComposer() {
+  const h = Math.round($("#composer").getBoundingClientRect().height) + 24;
+  state.layout.composerH = h;
+  document.documentElement.style.setProperty("--composer-h", h + "px");
 }
 
 // ---------------------------------------------------------------- camera
@@ -101,17 +58,14 @@ function applyCam() {
   const { cx, cy } = state.layout;
   const c = state.cam;
   world.style.transform = `translate(${cx}px,${cy}px) scale(${c.s}) rotate(${-c.r}deg) translate(${-c.x}px,${-c.y}px)`;
-  // Semantic zoom: far away, docs turn into clouds that show only a title;
-  // further still they melt into the sky and the projects' clouds come out.
-  document.body.classList.toggle("far", c.s < 0.5 && !state.holdNear);
   world.style.setProperty("--inv", (1 / c.s).toFixed(4));
+  // This project's chat clouds give way to the projects' clouds as you rise.
   const lw = levelW(c.s);
-  const dv = smooth(0.35, 0.85, lw), sv = 1 - smooth(0.12, 0.55, lw);
-  docsEl.style.opacity = linksEl.style.opacity = dv.toFixed(3);
-  docsEl.style.visibility = dv < 0.01 ? "hidden" : "";
+  const mv = smooth(0.35, 0.85, lw), sv = 1 - smooth(0.12, 0.55, lw);
+  mapEl.style.opacity = mv.toFixed(3);
+  mapEl.style.visibility = mv < 0.01 ? "hidden" : "";
   skyEl.style.opacity = sv.toFixed(3);
   skyEl.style.visibility = sv < 0.01 ? "hidden" : "";
-  document.body.classList.toggle("high", lw < 0.5);
 }
 
 const ease = (t) => t * t * t * (t * (6 * t - 15) + 10); // smootherstep: unhurried
@@ -119,14 +73,13 @@ let flight = null;
 
 function flyTo(target, { duration, dip = true } = {}) {
   const from = { ...state.cam };
-  const dist = Math.hypot(target.x - from.x, target.y - from.y);
+  const dist = Math.hypot(target.x - from.x, target.y - from.y) * Math.min(from.s, target.s);
   const d = reduceMotion ? 1 : duration ?? Math.min(2600, 1300 + dist * 0.4);
   // Prezi-style swoop: zoom out mid-flight, more for longer trips.
   const k = dip ? Math.max(0.45, Math.min(0.94, 1 - dist / (dist + state.layout.vw * 0.9))) : 1;
   const t0 = performance.now();
-  state.holdNear = from.s >= 0.5 && target.s >= 0.5; // a hop between sheets, not a zoom out
   world.classList.add("flying");
-  if (flight) cancelAnimationFrame(flight.raf);
+  if (flight) { cancelAnimationFrame(flight.raf); flight.resolve(); }
   return new Promise((resolve) => {
     flight = { resolve };
     const step = (now) => {
@@ -143,7 +96,6 @@ function flyTo(target, { duration, dip = true } = {}) {
         Object.assign(state.cam, target);
         applyCam();
         world.classList.remove("flying");
-        state.holdNear = false;
         flight = null;
         resolve();
       }
@@ -152,184 +104,253 @@ function flyTo(target, { duration, dip = true } = {}) {
   });
 }
 
-function camForDoc(i) {
-  const p = state.docs[i].pos;
-  return { x: p.x, y: p.y, s: 1, r: p.r };
+// The chat fades in as you sink into its cloud, and out as you rise.
+function setChatK(k) {
+  state.chatK = k;
+  chatEl.style.opacity = k.toFixed(3);
+  chatEl.style.transform = k > 0.999 ? "" : `scale(${(0.95 + 0.05 * k).toFixed(4)})`;
+  chatEl.style.visibility = k < 0.01 ? "hidden" : "";
+  chatEl.style.pointerEvents = k > 0.6 ? "" : "none";
+  viewportEl.style.opacity = (1 - k).toFixed(3);
+  viewportEl.style.visibility = k > 0.99 ? "hidden" : "";
 }
 
-function camForOverview() {
-  const { docW, docH, vw, vh, topH, composerH } = state.layout;
-  if (!state.docs.length) return { x: 0, y: 0, s: 1, r: 0 };
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  // Frame the pads around where you are (up to five), so titles stay readable.
-  const f = Math.max(0, state.focus), lo = Math.max(0, Math.min(f - 2, state.docs.length - 5));
-  for (const d of state.docs.slice(lo, lo + 5)) {
-    minX = Math.min(minX, d.pos.x - docW * 0.6); maxX = Math.max(maxX, d.pos.x + docW * 0.6);
-    minY = Math.min(minY, d.pos.y - docH * 0.6); maxY = Math.max(maxY, d.pos.y + docH * 0.6);
-  }
-  const availW = vw - 60, availH = vh - topH - composerH - 30;
-  const s = Math.min(availW / (maxX - minX), availH / (maxY - minY), 0.36);
-  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, s, r: 0 };
+let chatTween = null;
+function tweenChatK(to, ms = 700) {
+  if (chatTween) cancelAnimationFrame(chatTween);
+  const from = state.chatK, t0 = performance.now(), d = reduceMotion ? 1 : ms;
+  return new Promise((resolve) => {
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / d);
+      setChatK(from + (to - from) * ease(t));
+      if (t < 1) chatTween = requestAnimationFrame(step);
+      else { chatTween = null; resolve(); }
+    };
+    chatTween = requestAnimationFrame(step);
+  });
 }
 
-async function focusDoc(i, opts = {}) {
-  if (i < 0 || i >= state.docs.length) return;
-  setView("thread");
-  state.overview = false;
-  document.body.classList.remove("overview");
-  $("#btn-overview").classList.remove("active");
-  state.focus = i;
-  state.docs.forEach((d, j) => d.el.classList.toggle("focused", j === i));
-  updateNav();
-  renderNotes();
-  hidePopover();
-  await flyTo(camForDoc(i), opts);
-  if (state.focus === i) positionMarginalia(state.docs[i]);
+function setView(v) {
+  state.view = v;
+  for (const k of ["chat", "chats", "sky"]) document.body.classList.toggle("view-" + k, v === k);
+  syncChrome();
+  updateCrumb();
 }
 
-// O zooms out one level: doc → the thread's clouds → the sky of projects.
-function zoomOut() {
-  if (state.view === "sky") return;
-  if (state.overview) return showSky();
-  toggleOverview(true);
+// Over the blue (in a chat, or any time at night) the chrome is printed in white.
+function syncChrome() {
+  document.body.classList.toggle("night", state.night);
+  document.body.classList.toggle("onblue", state.view === "chat" || state.night);
 }
 
-function toggleOverview(on = !state.overview) {
-  if (!state.docs.length) return;
-  if (!on) return focusDoc(Math.max(0, state.focus));
-  setView("thread");
-  state.overview = true;
-  document.body.classList.add("overview");
-  $("#btn-overview").classList.add("active");
-  hidePopover();
-  updateNav();
-  flyTo(camForOverview(), { dip: false, duration: reduceMotion ? 1 : 1500 });
-}
-
-// ---------------------------------------------------------------- docs
+// ---------------------------------------------------------------- small helpers
 
 function fmtTime(ts) {
   return new Date(ts || Date.now()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+// When you last talked in a chat: "Today 2:14 PM", "Yesterday 9:03 PM", "Mon 4:10 PM", "Nov 3".
+function when(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(ts).setHours(0, 0, 0, 0)) / 864e5);
+  const time = fmtTime(ts);
+  if (days <= 0) return `Today ${time}`;
+  if (days === 1) return `Yesterday ${time}`;
+  if (days < 7) return `${d.toLocaleDateString([], { weekday: "short" })} ${time}`;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
 function esc(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 }
+const clip = (s, n) => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
 
-function headPrompt(user) {
-  if (!user) return "";
-  const n = user.display?.notes?.length || 0;
-  const t = (user.display?.text || "").trim();
-  const bits = [];
-  if (n) bits.push(`<b>${n} note${n > 1 ? "s" : ""}</b>`);
-  if (t) bits.push(esc(t.length > 90 ? t.slice(0, 90) + "…" : t));
-  return bits.length ? `↳ You: ${bits.join(" + ")}` : "";
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
 }
 
-function makeDoc(d) {
-  const el = document.createElement("article");
-  el.className = "doc";
-  el.innerHTML = `
-    <div class="doc-head"><span class="idx"></span><span class="time">${fmtTime(d.at)}</span><span class="spacer"></span><span class="prompt" title="">${headPrompt(d.user)}</span></div>
-    <div class="doc-scroll"><div class="doc-body"></div></div>
-    <div class="inscription"><span class="date"></span><span class="ed"></span></div>
-    <aside class="marginalia" aria-label="Your notes on this doc"></aside>
-    <div class="pad" aria-hidden="true"><span class="pad-title"></span><span class="pad-meta"></span></div>`;
-  d.el = el;
-  d.marginEl = $(".marginalia", el);
-  setPadTitle(d);
-  d.bodyEl = $(".doc-body", el);
-  d.scrollEl = $(".doc-scroll", el);
-  if (d.user?.display?.text) $(".prompt", el).title = d.user.display.text;
-  let tick = 0;
-  d.scrollEl.addEventListener("scroll", () => { tick ||= requestAnimationFrame(() => { tick = 0; positionMarginalia(d); }); }, { passive: true });
-  el.addEventListener("click", () => {
-    const i = state.docs.indexOf(d);
-    if (state.overview || i !== state.focus) focusDoc(i);
-  });
-  docsEl.appendChild(el);
-  return d;
+const projectName = (id) => state.projects.find((p) => p.id === id)?.name || "";
+const remember = (id) => { try { localStorage.setItem("shell.lastThread", id); } catch {} };
+
+// ---------------------------------------------------------------- the chat
+
+// Your words: the shorter they are, the bigger they float.
+function sizeClass(n) {
+  return n <= 40 ? "s1" : n <= 110 ? "s2" : n <= 260 ? "s3" : "s4";
 }
 
-function setPadTitle(d) {
-  $(".pad-title", d.el).textContent = d.title && d.title !== "…" ? d.title : "Writing…";
-  $(".pad-meta", d.el).textContent = d.streaming ? "" : fmtTime(d.at);
+function makeYou(display, at, { arrive = false } = {}) {
+  const text = (display?.text || "").trim();
+  const notes = display?.notes || [];
+  const el = document.createElement("section");
+  el.className = `msg you ${sizeClass(text ? text.length : 120)}${arrive ? " arrive" : ""}`;
+  el.innerHTML = `<div class="you-meta">You · ${fmtTime(at)}</div>`;
+  if (text) {
+    const t = document.createElement("div");
+    t.className = "you-text";
+    t.textContent = text;
+    el.appendChild(t);
+  }
+  if (notes.length) {
+    const ul = document.createElement("ul");
+    ul.className = "you-notes";
+    for (const n of notes) {
+      const li = document.createElement("li");
+      const q = document.createElement("q");
+      q.textContent = clip((n.quote || "").replace(/\s+/g, " ").trim(), 70);
+      li.append(q, `  ${n.note}`);
+      ul.appendChild(li);
+    }
+    el.appendChild(ul);
+  }
+  feed.appendChild(el);
+  return el;
 }
 
-// Like a print's pencilled margin: the date, and its place in the series.
-function pencilDate(ts) {
-  const d = new Date(ts || Date.now());
-  const day = d.getDate();
-  const suf = day % 10 === 1 && day !== 11 ? "st" : day % 10 === 2 && day !== 12 ? "nd" : day % 10 === 3 && day !== 13 ? "rd" : "th";
-  return `${d.toLocaleString("en-US", { month: "short" })}. ${day}${suf} ’${String(d.getFullYear()).slice(2)}`;
+// A cumulus around each reply: billows heaped along the top, tallest toward the
+// middle, a few smaller ones underneath. The text sits in the cloud's body.
+function puffsFor(seed) {
+  const r = rnd(seed);
+  r(); r();
+  const out = [];
+  const nTop = 4 + Math.floor(r() * 3);
+  for (let i = 0; i < nTop; i++) {
+    const t = (i + 0.5) / nTop;
+    const d = 70 + 100 * Math.sin(Math.PI * t) * (0.7 + r() * 0.5);
+    out.push(`<i class="puff top" style="left:${(7 + t * 86 + (r() - 0.5) * 6).toFixed(1)}%;--d:${d | 0}"></i>`);
+  }
+  for (let i = 0; i < 3; i++) {
+    const d = 60 + r() * 40;
+    out.push(`<i class="puff low" style="left:${(20 + i * 30 + (r() - 0.5) * 10).toFixed(1)}%;--d:${d | 0}"></i>`);
+  }
+  const ds = 90 + r() * 40;
+  out.push(`<i class="puff side" style="left:1.5%;--d:${ds | 0}"></i>`, `<i class="puff side" style="left:98.5%;--d:${(ds * 0.8) | 0}"></i>`);
+  return out.join("");
 }
 
-function renumber() {
-  const n = state.docs.length;
-  state.docs.forEach((d, i) => {
-    $(".idx", d.el).textContent = `Doc ${i + 1}`;
-    $(".inscription .date", d.el).textContent = pencilDate(d.at);
-    $(".inscription .ed", d.el).textContent = `${i + 1}/${n}`;
-  });
+function makeReply(m, { arrive = false } = {}) {
+  const el = document.createElement("section");
+  el.className = "msg reply" + (arrive ? " arrive" : "");
+  el.innerHTML = `<div class="shape">${puffsFor(hashStr(m.id))}<div class="body"><div class="reply-head">${fmtTime(m.at)}</div><div class="doc-body"></div></div></div><aside class="marginalia" aria-label="Your notes on this reply"></aside>`;
+  m.el = el;
+  m.bodyEl = $(".doc-body", el);
+  m.marginEl = $(".marginalia", el);
+  feed.appendChild(el);
+  return m;
 }
 
-function renderBody(d, { animate = true } = {}) {
-  const html = DOMPurify.sanitize(marked.parse(d.text || ""));
+function renderBody(m, { animate = true } = {}) {
+  const html = DOMPurify.sanitize(marked.parse(m.text || ""));
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
   const next = [...tmp.children];
-  const cur = [...d.bodyEl.children].filter((c) => !c.classList.contains("caret-host"));
+  const cur = [...m.bodyEl.children];
   let i = 0;
   while (i < cur.length && i < next.length && cur[i].outerHTML === next[i].outerHTML) i++;
   // Replace everything from the first changed block onward.
   for (let j = i; j < cur.length; j++) cur[j].remove();
   for (let j = i; j < next.length; j++) {
     const n = next[j];
-    // Only blocks that are new (not just growing) get the materialize effect.
+    // Only blocks that are new (not just growing) ink in.
     if (animate && j >= cur.length) n.classList.add("materialize");
-    d.bodyEl.appendChild(n);
+    m.bodyEl.appendChild(n);
   }
-  // Caret at the end while streaming
-  d.bodyEl.querySelector(".caret")?.remove();
-  if (d.streaming) {
-    const last = d.bodyEl.lastElementChild;
+  m.bodyEl.querySelector(".caret")?.remove();
+  if (m.streaming) {
+    const last = m.bodyEl.lastElementChild;
     const host = last?.matches("ul,ol") ? last.querySelector("li:last-child") || last : last;
     const caret = document.createElement("span");
     caret.className = "caret";
-    (host || d.bodyEl).appendChild(caret);
+    (host || m.bodyEl).appendChild(caret);
   }
 }
 
-function finalizeDoc(d) {
-  d.streaming = false;
-  d.bodyEl.querySelector(".caret")?.remove();
-  d.bodyEl.querySelectorAll(".materialize").forEach((n) => n.classList.remove("materialize"));
-  addGutters(d);
-  d.el.style.setProperty("--sweep-h", d.scrollEl.clientHeight + 120 + "px");
-  d.el.classList.add("sweep");
-  setTimeout(() => d.el.classList.remove("sweep"), 1200);
+function finalizeReply(m) {
+  m.streaming = false;
+  m.bodyEl.querySelector(".caret")?.remove();
+  m.bodyEl.querySelectorAll(".materialize").forEach((n) => n.classList.remove("materialize"));
+  addGutters(m);
+  renderMarginalia(m);
 }
 
-function addGutters(d) {
-  [...d.bodyEl.children].forEach((block) => {
+function addGutters(m) {
+  [...m.bodyEl.children].forEach((block) => {
     if (block.querySelector(":scope > .gutter")) return;
     const b = document.createElement("button");
     b.className = "gutter";
     b.setAttribute("aria-label", "Note on this part");
     b.addEventListener("click", (e) => {
       e.stopPropagation();
-      const start = textOffset(d.bodyEl, block, 0);
+      const start = textOffset(m.bodyEl, block, 0);
       const end = start + block.textContent.length;
-      const r = document.createRange();
-      r.selectNodeContents(block);
-      openPopover({ doc: d, start, end, quote: block.textContent.trim() }, b.getBoundingClientRect());
+      openPopover({ msg: m, start, end, quote: block.textContent.trim() }, b.getBoundingClientRect());
     });
     block.appendChild(b);
   });
 }
 
 function thinkingMarkup() {
-  return `<div class="thinking"><div class="label">Thinking it through…</div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="activity"></div></div>`;
+  return `<div class="thinking"><div class="label">Thinking it through…</div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="activity"></div></div>`;
+}
+
+const INVITES = ["What's on your mind?", "Where should we start?", "What are we making today?", "Say it plainly. I'm listening."];
+
+function renderEmpty() {
+  const p = projectName(state.thread?.projectId);
+  const el = document.createElement("section");
+  el.className = "empty";
+  el.innerHTML = `<div class="where">${esc(p ? p + " · " : "")}new chat</div><h1>${INVITES[Math.floor(Math.random() * INVITES.length)]}</h1>
+    <p>Type anywhere. Your words float up into the sky.</p>
+    <p>Select words in a reply to leave a note. <kbd>O</kbd> rises above the clouds.</p>`;
+  feed.appendChild(el);
+}
+
+// Keep room below your newest message so it can sit near the top while the reply writes itself under it.
+function fitSpacer(anchor) {
+  const base = (state.layout.composerH || 150) + 40;
+  if (!anchor) { spacer.style.height = base + "px"; return; }
+  const below = feed.offsetTop + feed.offsetHeight - anchor.offsetTop;
+  spacer.style.height = Math.max(base, chatEl.clientHeight - below - state.layout.topH - 30) + "px";
+}
+
+function renderThread() {
+  feed.innerHTML = "";
+  state.msgs = [];
+  const t = state.thread;
+  if (!t.turns.length) renderEmpty();
+  for (const turn of t.turns) {
+    if (turn.role === "user") makeYou(turn.display || { text: turn.text }, turn.at);
+    else {
+      const m = makeReply({ id: turn.id, text: turn.text, title: turn.title, at: turn.at });
+      state.msgs.push(m);
+      renderBody(m, { animate: false });
+      addGutters(m);
+    }
+  }
+  loadNotes();
+  renderNotes();
+  updateCrumb();
+  fitSpacer();
+  chatEl.scrollTop = chatEl.scrollHeight;
+  requestAnimationFrame(() => { chatEl.scrollTop = chatEl.scrollHeight; state.msgs.forEach(positionMarginalia); });
+}
+
+async function openThread(id) {
+  const t = await api(`/api/threads/${id}`);
+  state.thread = t;
+  state.projectId = t.projectId;
+  remember(id);
+  renderThread();
+}
+
+// A new chat is only a draft until you say something; nothing is saved before that.
+function draftThread(projectId = state.projectId) {
+  state.thread = { id: null, projectId, title: "", turns: [] };
+  state.projectId = projectId;
+  renderThread();
 }
 
 // ---------------------------------------------------------------- notes & highlights
@@ -353,7 +374,7 @@ function rangeFromOffsets(root, start, end) {
   return started ? r : null;
 }
 
-const notesKey = () => `shell.notes.${state.thread?.id}`;
+const notesKey = () => `shell.notes.${state.thread?.id || "draft"}`;
 function saveNotes() {
   try { localStorage.setItem(notesKey(), JSON.stringify(state.notes)); } catch {}
   renderNotes();
@@ -363,29 +384,27 @@ function loadNotes() {
 }
 
 function addNote(target, text) {
-  const note = {
+  state.notes.push({
     id: Math.random().toString(36).slice(2, 9),
-    docId: target.doc.id,
-    docTitle: target.doc.title,
+    docId: target.msg.id,
+    docTitle: target.msg.title || state.thread?.title || "your reply",
     quote: target.quote.slice(0, 600),
     start: target.start,
     end: target.end,
     note: text,
     at: Date.now(),
-  };
-  state.notes.push(note);
+  });
   saveNotes();
   window.getSelection()?.removeAllRanges();
-  pulseChip();
 }
 
 function paintHighlights(activeId) {
   if (!HL_SUPPORTED) return;
   const normal = [], active = [];
   for (const n of state.notes) {
-    const d = state.docs.find((x) => x.id === n.docId);
-    if (!d) continue;
-    const r = rangeFromOffsets(d.bodyEl, n.start, n.end);
+    const m = state.msgs.find((x) => x.id === n.docId);
+    if (!m) continue;
+    const r = rangeFromOffsets(m.bodyEl, n.start, n.end);
     if (r) (n.id === activeId ? active : normal).push(r);
   }
   CSS.highlights.set("note", new Highlight(...normal));
@@ -396,18 +415,12 @@ function renderNotes() {
   const list = $("#notes-list");
   const n = state.notes.length;
   $("#notes-count").textContent = n;
-  $("#notes-empty").style.display = n ? "none" : "";
   list.innerHTML = "";
-  const focusId = state.docs[state.focus]?.id;
-  // Notes on the focused doc first, then others.
-  const sorted = [...state.notes].sort((a, b) => (b.docId === focusId) - (a.docId === focusId) || a.at - b.at);
-  for (const note of sorted) {
+  for (const note of [...state.notes].sort((a, b) => a.at - b.at)) {
     const card = document.createElement("div");
     card.className = "note-card";
-    const di = state.docs.findIndex((d) => d.id === note.docId);
-    card.innerHTML = `<div class="q"></div><div class="n" contenteditable="plaintext-only" spellcheck="true"></div>
-      <div class="meta"><span class="doc-tag">${di >= 0 ? "Doc " + (di + 1) : "Doc"}</span><span>${fmtTime(note.at)}</span><button class="del" title="Delete note">delete</button></div>`;
-    $(".q", card).textContent = note.quote.length > 180 ? note.quote.slice(0, 180) + "…" : note.quote;
+    card.innerHTML = `<div class="q"></div><div class="n" contenteditable="plaintext-only" spellcheck="true"></div><div class="meta"><button class="del" title="Delete note">delete</button></div>`;
+    $(".q", card).textContent = clip(note.quote, 180);
     const nEl = $(".n", card);
     nEl.textContent = note.note;
     nEl.addEventListener("blur", () => {
@@ -415,32 +428,27 @@ function renderNotes() {
       if (v && v !== note.note) { note.note = v; saveNotes(); }
     });
     nEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); nEl.blur(); } });
-    $(".del", card).addEventListener("click", () => {
-      state.notes = state.notes.filter((x) => x.id !== note.id);
-      saveNotes();
-    });
+    $(".del", card).addEventListener("click", () => { state.notes = state.notes.filter((x) => x.id !== note.id); saveNotes(); });
     card.addEventListener("mouseenter", () => paintHighlights(note.id));
     card.addEventListener("mouseleave", () => paintHighlights());
     $(".q", card).addEventListener("click", () => jumpToNote(note));
     list.appendChild(card);
   }
+  if (!n) $("#notes-panel").classList.remove("open");
   paintHighlights();
-  state.docs.forEach(renderMarginalia);
+  state.msgs.forEach(renderMarginalia);
   document.body.classList.toggle("has-notes", n > 0);
-  // composer chip
   $("#attach").hidden = !n;
   $(".attach-count").textContent = n;
-  // constellation dots
-  updateNav();
+  requestAnimationFrame(measureComposer);
 }
 
-// Pencil notes in the margin beside the sheet, each level with the words it is about.
-function renderMarginalia(d) {
-  const box = d.marginEl;
+// Pencil notes in the sky beside the cloud, each level with the words it is about.
+function renderMarginalia(m) {
+  const box = m.marginEl;
   if (!box) return;
   box.innerHTML = "";
-  const notes = state.notes.filter((n) => n.docId === d.id).sort((a, b) => a.start - b.start);
-  for (const note of notes) {
+  for (const note of state.notes.filter((n) => n.docId === m.id).sort((a, b) => a.start - b.start)) {
     const el = document.createElement("div");
     el.className = "pencil-note";
     el.innerHTML = `<span class="n" contenteditable="plaintext-only" spellcheck="false"></span><button class="del" title="Erase this note" aria-label="Erase this note">×</button>`;
@@ -461,57 +469,30 @@ function renderMarginalia(d) {
     el.addEventListener("mouseleave", () => paintHighlights());
     box.appendChild(el);
   }
-  positionMarginalia(d);
+  positionMarginalia(m);
 }
 
-// Where a note's words sit down the sheet, measured in the sheet's own pixels.
-function noteAnchorY(d, note) {
-  // The first text node that actually holds the note's first character.
-  const walker = document.createTreeWalker(d.bodyEl, NodeFilter.SHOW_TEXT);
-  let pos = 0, node, block = null;
-  while ((node = walker.nextNode())) {
-    if (pos + node.data.length > note.start) { block = node; break; }
-    pos += node.data.length;
-  }
-  while (block && block.parentNode !== d.bodyEl) block = block.parentNode;
-  if (!block || block.nodeType !== 1) return 0;
-  // How far down its block the first line of the quote starts.
-  const r = rangeFromOffsets(d.bodyEl, note.start, note.end);
-  const first = r && [...r.getClientRects()].find((q) => q.width > 0.5);
-  const dy = first ? Math.max(0, (first.top - block.getBoundingClientRect().top) / (state.cam.s || 1)) : 0;
-  return block.offsetTop + d.bodyEl.offsetTop + d.scrollEl.offsetTop - d.scrollEl.scrollTop + dy;
-}
-
-function positionMarginalia(d) {
-  const H = d.el.clientHeight;
-  let floor = 6;
-  for (const el of d.marginEl?.children || []) {
-    const a = noteAnchorY(d, el.note);
-    const y = Math.max(floor, Math.min(a, H - 34));
+function positionMarginalia(m) {
+  if (!m.marginEl?.children.length || !state.layout.wide) return;
+  const top = m.el.getBoundingClientRect().top;
+  const k = state.chatK > 0.999 ? 1 : 0.95 + 0.05 * state.chatK; // undo the fade-in scale
+  let floor = 0;
+  for (const el of m.marginEl.children) {
+    const r = rangeFromOffsets(m.bodyEl, el.note.start, el.note.end);
+    const first = r && [...r.getClientRects()].find((q) => q.width > 0.5);
+    const y = Math.max(floor, first ? (first.top - top) / k - 4 : 0);
     el.style.top = y + "px";
-    el.classList.toggle("off", a < -12 || a > H - 20); // its words are scrolled out of view
     floor = y + el.offsetHeight + 8;
   }
 }
 
-async function jumpToNote(note) {
-  const i = state.docs.findIndex((d) => d.id === note.docId);
-  if (i < 0) return;
-  if (i !== state.focus || state.overview) await focusDoc(i);
-  const d = state.docs[i];
-  const r = rangeFromOffsets(d.bodyEl, note.start, note.end);
+function jumpToNote(note) {
+  const m = state.msgs.find((x) => x.id === note.docId);
+  const r = m && rangeFromOffsets(m.bodyEl, note.start, note.end);
   if (!r) return;
-  const rect = r.getBoundingClientRect(), box = d.scrollEl.getBoundingClientRect();
-  d.scrollEl.scrollBy({ top: rect.top - box.top - box.height / 3, behavior: "smooth" });
+  chatEl.scrollBy({ top: r.getBoundingClientRect().top - innerHeight / 3, behavior: "smooth" });
   paintHighlights(note.id);
   setTimeout(() => paintHighlights(), 1400);
-}
-
-function pulseChip() {
-  const chip = $("#attach-chip");
-  chip.style.animation = "none";
-  chip.offsetHeight;
-  chip.style.animation = "";
 }
 
 // ---------------------------------------------------------------- popover
@@ -576,20 +557,19 @@ $("#pop-input").addEventListener("keydown", (e) => {
 
 function checkSelection() {
   const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+  if (!sel || sel.isCollapsed || !sel.rangeCount || state.view !== "chat") return;
   const range = sel.getRangeAt(0);
-  const d = state.docs[state.focus];
-  if (!d || d.streaming || state.overview) return;
-  if (!d.bodyEl.contains(range.commonAncestorContainer)) return;
+  const m = state.msgs.find((x) => x.bodyEl.contains(range.commonAncestorContainer));
+  if (!m || m.streaming) return;
   const quote = sel.toString().trim();
   if (quote.length < 2) return;
-  const start = textOffset(d.bodyEl, range.startContainer, range.startOffset);
-  const end = textOffset(d.bodyEl, range.endContainer, range.endOffset);
-  openPopover({ doc: d, start, end, quote }, range.getBoundingClientRect());
+  const start = textOffset(m.bodyEl, range.startContainer, range.startOffset);
+  const end = textOffset(m.bodyEl, range.endContainer, range.endOffset);
+  openPopover({ msg: m, start, end, quote }, range.getBoundingClientRect());
 }
 
-docsEl.addEventListener("mouseup", () => setTimeout(checkSelection, 0));
-docsEl.addEventListener("touchend", () => setTimeout(checkSelection, 250));
+feed.addEventListener("mouseup", () => setTimeout(checkSelection, 0));
+feed.addEventListener("touchend", () => setTimeout(checkSelection, 250));
 document.addEventListener("selectionchange", () => {
   if (!matchMedia("(pointer: coarse)").matches) return;
   clearTimeout(checkSelection.t);
@@ -598,6 +578,8 @@ document.addEventListener("selectionchange", () => {
 document.addEventListener("mousedown", (e) => {
   if (!pop.hidden && !pop.contains(e.target) && !e.target.closest(".gutter")) hidePopover();
 });
+// Scrolling away closes the quick reactions (but never a note you're writing).
+chatEl.addEventListener("scroll", () => { if (!pop.hidden && $(".pop-write", pop).hidden) hidePopover(); }, { passive: true });
 
 // ---------------------------------------------------------------- sending
 
@@ -611,40 +593,54 @@ function canSend() {
   return !state.busy && (input.value.trim() || state.notes.length);
 }
 
+// The chat is saved the moment you first say something in it.
+async function ensureThread(thread) {
+  if (thread.id) return;
+  const t = await api("/api/threads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId: thread.projectId }) });
+  Object.assign(thread, { id: t.id, created: t.created });
+  remember(t.id);
+}
+
 async function send() {
   if (!canSend()) return;
-  const text = input.value;
+  const text = input.value.trim();
   const notes = state.notes.map(({ quote, note, docTitle }) => ({ quote, note, docTitle }));
   const sentNotes = state.notes;
   input.value = "";
   autoGrow();
-  input.blur(); // the reply is a doc to read; letter keys go back to moving around
+  input.blur(); // letter keys go back to moving around while you read
   state.notes = [];
   saveNotes();
+  hidePopover();
   setBusy(true);
 
-  const d = makeDoc({ id: "pending-" + Date.now(), text: "", title: "…", streaming: true, at: Date.now(), user: { display: { text, notes } } });
-  state.docs.push(d);
-  renumber();
-  placeDocs();
-  d.bodyEl.innerHTML = thinkingMarkup();
-  const flown = focusDoc(state.docs.length - 1);
+  feed.querySelector(".empty")?.remove();
+  const youEl = makeYou({ text, notes }, Date.now(), { arrive: true });
+  const m = makeReply({ id: "pending-" + Date.now(), text: "", streaming: true, at: Date.now() }, { arrive: true });
+  state.msgs.push(m);
+  m.bodyEl.innerHTML = thinkingMarkup();
+  // Your message rises to the top; the reply gathers beneath it.
+  fitSpacer(youEl);
+  chatEl.scrollTo({ top: youEl.offsetTop - state.layout.topH - 30, behavior: reduceMotion ? "auto" : "smooth" });
 
   let first = true, dirty = false;
   const acts = [];
   const showActs = () => {
-    const el = d.bodyEl.querySelector(".activity");
+    const el = m.bodyEl.querySelector(".activity");
     if (el) el.innerHTML = acts.slice(-4).map((a) => `<div>${esc(a)}</div>`).join("");
   };
   const flush = () => {
     if (!dirty) return;
     dirty = false;
-    // No auto-scroll: you read from the top while the rest writes itself below.
-    renderBody(d);
+    renderBody(m); // no auto-scroll: you read from the top while the rest writes itself below
+    fitSpacer(youEl);
   };
 
+  // You might wander off to another chat while this one replies; keep hold of this one.
+  const thread = state.thread;
   try {
-    const res = await fetch(`/api/threads/${state.thread.id}/send`, {
+    await ensureThread(thread);
+    const res = await fetch(`/api/threads/${thread.id}/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, notes }),
@@ -652,8 +648,7 @@ async function send() {
     if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
-    let buf = "";
-    let failed = null;
+    let buf = "", failed = null;
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -664,160 +659,59 @@ async function send() {
         buf = buf.slice(idx + 2);
         const ev = /^event: (.+)$/m.exec(raw)?.[1];
         const data = JSON.parse(/^data: (.+)$/m.exec(raw)?.[1] || "{}");
-        if (ev === "user") d.user = data;
-        else if (ev === "activity") { acts.push(data.text); showActs(); }
+        if (ev === "activity") { acts.push(data.text); showActs(); }
         else if (ev === "reset") {
           // The text so far was a preamble before Claude looked something up.
-          d.text = "";
+          m.text = "";
           first = true;
-          d.bodyEl.innerHTML = thinkingMarkup();
+          m.bodyEl.innerHTML = thinkingMarkup();
           showActs();
-        }
-        else if (ev === "delta" && data.text) {
-          if (first) { first = false; await flown; d.bodyEl.innerHTML = ""; }
-          d.text += data.text;
+        } else if (ev === "delta" && data.text) {
+          if (first) { first = false; m.bodyEl.innerHTML = ""; }
+          m.text += data.text;
           if (!dirty) { dirty = true; requestAnimationFrame(flush); }
-        } else if (ev === "usage") {
-          // usage is available here if we want a cost readout later
         } else if (ev === "done") {
-          Object.assign(d, { id: data.doc.id, title: data.doc.title, at: data.doc.at });
-          setPadTitle(d);
-          state.thread.title = data.threadTitle;
-          updateCrumb();
+          Object.assign(m, { id: data.doc.id, title: data.doc.title, at: data.doc.at });
+          thread.title = data.threadTitle;
+          if (state.thread === thread) updateCrumb();
         } else if (ev === "error") failed = data;
       }
     }
-    if (failed) throw Object.assign(new Error(failed.message), { restore: true });
+    if (failed) throw new Error(failed.message);
     dirty = true;
     flush();
-    finalizeDoc(d);
-    updateNav();
+    finalizeReply(m);
+    loadProjects().then(() => { if (state.view !== "chat") buildMap(); }).catch(() => {});
   } catch (err) {
     // Put everything back so nothing is lost.
-    d.el.remove();
-    state.docs.splice(state.docs.indexOf(d), 1);
-    renumber();
-    placeDocs();
+    youEl.remove();
+    m.el.remove();
+    const i = state.msgs.indexOf(m);
+    if (i >= 0) state.msgs.splice(i, 1);
+    if (!feed.children.length) renderEmpty();
     input.value = text;
     autoGrow();
     state.notes = [...sentNotes, ...state.notes];
     saveNotes();
+    fitSpacer();
     toast(err.message || "Something went wrong", true);
-    if (state.docs.length) focusDoc(state.docs.length - 1);
   } finally {
     setBusy(false);
   }
 }
 
-// ---------------------------------------------------------------- threads
-
-const WELCOME = `# Welcome to Shell
-
-> Every answer I give you is a document. React right on it. Your notes come back to me together, with no copy-paste.
-
-## How it works
-
-1. **Ask** in the bar at the bottom. Type, or tap the mic and talk.
-2. **Read** my reply. It lands here as a doc, like this one.
-3. **React.** Select any words and pick a reaction, or tap the **+** beside a paragraph.
-4. **Send.** All your notes go back in one batch. I answer each one.
-
-## Moving around
-
-- **← →** fly between docs in this thread.
-- **O** zooms out. Docs turn into clouds. Press **O** again to rise into the sky, where every project is a cloud.
-- **T** opens this project's threads. **N** starts a new one.
-
-## Try it now
-
-Select this sentence and tap **✓ Yes**. Watch it land in pencil in the margin.`;
-
-async function api(path, opts) {
-  const r = await fetch(path, opts);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
-}
-
-// from: "sky" when diving down out of a project's cloud, "boot" on first load,
-// otherwise a short glide in from just above the thread.
-async function openThread(id, { from = "near" } = {}) {
-  const t = await api(`/api/threads/${id}`);
-  state.thread = t;
-  state.projectId = t.projectId;
-  try { localStorage.setItem("shell.lastThread", id); } catch {}
-  updateCrumb();
-  docsEl.innerHTML = "";
-  state.docs = [];
-  let lastUser = null;
-  for (const turn of t.turns) {
-    if (turn.role === "user") { lastUser = turn; continue; }
-    state.docs.push(makeDoc({ id: turn.id, text: turn.text, title: turn.title, at: turn.at, user: lastUser }));
-    lastUser = null;
-  }
-  if (!state.docs.length) {
-    state.docs.push(makeDoc({ id: "welcome", text: WELCOME, title: "Welcome to Shell", local: true, at: Date.now() }));
-  }
-  for (const d of state.docs) { renderBody(d, { animate: false }); addGutters(d); setPadTitle(d); }
-  renumber();
-  placeDocs();
-  loadNotes();
-  renderNotes();
-  closeDrawer();
-  const last = state.docs.length - 1;
-  if (from === "boot" && SKY.g) {
-    // Open on the sky, hold a breath, then sink into this project's cloud.
-    Object.assign(state.cam, camForSky());
-    setView("sky");
-    applyCam();
-    await new Promise((r) => setTimeout(r, reduceMotion ? 0 : 1300));
-    await focusDoc(last, { duration: reduceMotion ? 1 : 3000, dip: false });
-  } else if (from === "sky" && SKY.g) {
-    // The camera was over this project's cloud; the cloud now sits on the latest doc.
-    Object.assign(state.cam, { x: SKY.origin.x, y: SKY.origin.y, r: 0 });
-    applyCam();
-    await focusDoc(last, { duration: reduceMotion ? 1 : 2600, dip: false });
-  } else {
-    const o = camForOverview();
-    Object.assign(state.cam, { ...o, s: o.s * 0.6, r: -6 });
-    applyCam();
-    await focusDoc(last, { duration: reduceMotion ? 1 : 1900, dip: false });
-  }
-  if (innerWidth <= 760) input.placeholder = "Ask anything";
-}
-
-async function newThread(projectId = state.projectId, opts) {
-  const t = await api("/api/threads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId }) });
-  await openThread(t.id, opts);
-  loadProjects().catch(() => {});
-}
-
-const projectName = (id) => state.projects.find((p) => p.id === id)?.name || "";
+// ---------------------------------------------------------------- header, drawer, toast
 
 function updateCrumb() {
-  $("#crumb-project").textContent = projectName(state.projectId);
-  $("#thread-title").textContent = state.thread?.title || "";
+  const crumb = $("#crumb-project"), title = $("#thread-title");
+  if (state.view === "sky") { crumb.textContent = "All projects"; title.textContent = ""; return; }
+  crumb.textContent = projectName(state.projectId);
+  title.textContent = state.view === "chat" ? state.thread?.title || "New chat" : "";
 }
 
-async function refreshThreadList() {
-  const all = await api("/api/threads");
-  const list = all.filter((t) => !state.projectId || t.projectId === state.projectId);
-  $("#drawer .label").textContent = projectName(state.projectId) || "Threads";
-  $("#drawer-new").textContent = `+ New thread${state.projectId ? " in " + projectName(state.projectId) : ""}`;
-  const el = $("#thread-list");
-  el.innerHTML = "";
-  for (const t of list) {
-    const b = document.createElement("button");
-    b.className = "thread-item" + (t.id === state.thread?.id ? " on" : "");
-    b.innerHTML = `<span class="t"></span><span class="m">${t.docs} doc${t.docs === 1 ? "" : "s"} · ${new Date(t.updated).toLocaleDateString([], { month: "short", day: "numeric" })}</span>`;
-    $(".t", b).textContent = t.title;
-    b.addEventListener("click", () => openThread(t.id));
-    el.appendChild(b);
-  }
-  return all;
-}
-
-function openDrawer() {
-  refreshThreadList();
+async function openDrawer() {
+  await loadProjects().catch(() => {});
+  renderDrawer();
   $("#drawer").classList.add("open");
   $("#drawer-scrim").hidden = false;
 }
@@ -826,24 +720,54 @@ function closeDrawer() {
   $("#drawer-scrim").hidden = true;
 }
 
-// ---------------------------------------------------------------- HUD
-
-function updateNav() {
-  $("#constellation").innerHTML = '<div class="track"></div>';
-  const c = $("#constellation .track");
-  const noteDocs = new Set(state.notes.map((n) => n.docId));
-  state.docs.forEach((d, i) => {
-    if (i) c.appendChild(document.createElement("i"));
-    const b = document.createElement("button");
-    b.className = (i === state.focus && !state.overview ? "on " : "") + (noteDocs.has(d.id) ? "has-notes" : "");
-    b.dataset.tip = d.title || `Doc ${i + 1}`;
-    b.setAttribute("aria-label", d.title || `Doc ${i + 1}`);
-    b.innerHTML = "<span></span>";
-    b.addEventListener("click", () => focusDoc(i));
-    c.appendChild(b);
-  });
-  $("#nav-prev").disabled = state.focus <= 0;
-  $("#nav-next").disabled = state.focus >= state.docs.length - 1;
+// Every chat, grouped by project like folders, newest first. Client work keeps its own section.
+function renderDrawer() {
+  const list = $("#drawer-list");
+  list.innerHTML = "";
+  const groups = [["Your projects", state.projects.filter((p) => p.group !== "client")], ["Client work", state.projects.filter((p) => p.group === "client")]];
+  for (const [label, projs] of groups) {
+    const g = document.createElement("div");
+    g.className = "d-group";
+    g.textContent = label;
+    list.appendChild(g);
+    if (!projs.length) {
+      const e = document.createElement("div");
+      e.className = "d-empty";
+      e.textContent = 'None yet. Add one to projects.json with "group": "client".';
+      list.appendChild(e);
+    }
+    for (const p of projs) {
+      const head = document.createElement("div");
+      head.className = "d-proj";
+      head.innerHTML = `<button class="name" title="See ${esc(p.name)}'s chats as clouds"></button><button class="add" title="New chat in ${esc(p.name)}" aria-label="New chat in ${esc(p.name)}">+</button>`;
+      $(".name", head).textContent = p.name;
+      $(".name", head).addEventListener("click", () => { closeDrawer(); showChats(p.id); });
+      $(".add", head).addEventListener("click", () => { closeDrawer(); newChat(p.id); });
+      list.appendChild(head);
+      const chats = p.threads || [];
+      if (!chats.length) {
+        const e = document.createElement("div");
+        e.className = "d-empty";
+        e.textContent = "No chats yet";
+        list.appendChild(e);
+      }
+      for (const t of chats.slice(0, 8)) {
+        const b = document.createElement("button");
+        b.className = "d-item" + (t.id === state.thread?.id ? " on" : "");
+        b.innerHTML = `<span class="t"></span><span class="m">${esc(when(t.updated))}</span>`;
+        $(".t", b).textContent = t.title;
+        b.addEventListener("click", () => { closeDrawer(); goToChat(t.id); });
+        list.appendChild(b);
+      }
+      if (chats.length > 8) {
+        const more = document.createElement("button");
+        more.className = "d-item";
+        more.innerHTML = `<span class="t">${chats.length - 8} more… see them all as clouds</span>`;
+        more.addEventListener("click", () => { closeDrawer(); showChats(p.id); });
+        list.appendChild(more);
+      }
+    }
+  }
 }
 
 function toast(msg, err = false) {
@@ -859,9 +783,14 @@ function tickClock() {
   $("#clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// The longer you write, the smaller your words get, so the whole thought stays in view.
 function autoGrow() {
+  const n = input.value.length;
+  input.classList.toggle("m", n > 50 && n <= 160);
+  input.classList.toggle("l", n > 160);
   input.style.height = "auto";
-  input.style.height = Math.min(input.scrollHeight, innerHeight * 0.3) + "px";
+  input.style.height = Math.min(input.scrollHeight, innerHeight * 0.38) + "px";
+  measureComposer();
 }
 
 // ---------------------------------------------------------------- printmaking textures
@@ -977,7 +906,6 @@ const hourNow = () => {
 // ---- the sky's layout: where every project's cloud floats
 
 const SKY = { K: 40, origin: { x: 0, y: 0 }, g: null, clouds: [], hover: null };
-const skyEl = $("#sky");
 
 function hashStr(s) {
   let h = 2166136261;
@@ -1059,25 +987,99 @@ function ago(ts) {
   return days <= 0 ? "today" : days === 1 ? "yesterday" : days < 7 ? `${days} days ago` : new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+// ---- one level up: this project's chats, each a cloud, newest first
+
+const MAP = { clouds: [], byId: {}, newCloud: null, cols: 3, W: 860, H: 380, GX: 1080, GY: 640 };
+
+function buildMap() {
+  const proj = state.projects.find((p) => p.id === state.projectId);
+  const chats = proj?.threads || []; // the server sorts them by last talked, newest first
+  const items = [{ id: null, isNew: true, title: "New chat", updated: null }, ...chats];
+  const { vw, vh } = state.layout;
+  const cols = (MAP.cols = vw < 760 || vh > vw * 1.15 ? 1 : items.length <= 4 ? 2 : 3);
+  const { W, H, GX, GY } = MAP;
+  MAP.byId = {};
+  MAP.clouds = items.map((it, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    // read like a page: newest top-left, older to the right and down, drifting a little
+    const x = (col - (cols - 1) / 2) * GX + (row % 2 ? GX * 0.12 : -GX * 0.04) + Math.sin(i * 2.3) * 40;
+    const y = row * GY + Math.sin(i * 1.7 + 0.6) * 60;
+    const w = it.isNew ? W * 0.7 : W, h = it.isNew ? H * 0.62 : H;
+    const seed = hashStr(it.id || state.projectId + ":new");
+    const cl = {
+      kind: "chat", key: "chat:" + (it.id || "new"), id: it.id, isNew: !!it.isNew, item: it, x, y, w, h,
+      puffs: cloudPuffs(seed, w, h), ph: (seed % 628) / 100, depth: 0.8 + (i % 3) * 0.15, hov: 0, ghost: !!it.isNew,
+    };
+    if (it.id) MAP.byId[it.id] = cl;
+    else MAP.newCloud = cl;
+    return cl;
+  });
+  // The project's cloud up in the sky sits right over the chats you see first.
+  const f = framed();
+  SKY.origin = { x: (f.minX + f.maxX) / 2, y: (f.minY + f.maxY) / 2 };
+  renderMapLabels();
+  buildSky();
+}
+
+// The chats you see first when you rise out of a chat: the newest three rows.
+function framed() {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const c of MAP.clouds.slice(0, MAP.cols * 3)) {
+    minX = Math.min(minX, c.x - MAP.W * 0.62); maxX = Math.max(maxX, c.x + MAP.W * 0.62);
+    minY = Math.min(minY, c.y - MAP.H * 0.85); maxY = Math.max(maxY, c.y + MAP.H * 0.75);
+  }
+  return { minX, maxX, minY, maxY };
+}
+
+function camForChats() {
+  const { vw, vh, topH } = state.layout;
+  const f = framed();
+  const s = Math.min((vw - 60) / (f.maxX - f.minX), (vh - topH - 50) / (f.maxY - f.minY), 0.55);
+  return { x: (f.minX + f.maxX) / 2, y: (f.minY + f.maxY) / 2, s, r: 0 };
+}
+
+function hoverable(el, key) {
+  const on = () => (SKY.hover = key), off = () => { if (SKY.hover === key) SKY.hover = null; };
+  el.addEventListener("pointerenter", on); el.addEventListener("focus", on);
+  el.addEventListener("pointerleave", off); el.addEventListener("blur", off);
+}
+
+function renderMapLabels() {
+  mapEl.innerHTML = "";
+  for (const cl of MAP.clouds) {
+    const el = document.createElement("button");
+    el.className = "map-cloud" + (cl.isNew ? " new" : "") + (cl.id && cl.id === state.thread?.id ? " here" : "");
+    el.style.cssText = `left:${cl.x - cl.w / 2}px;top:${cl.y - cl.h / 2}px;width:${cl.w}px;height:${cl.h}px`;
+    el.innerHTML = `<span class="name"></span><span class="meta"></span>`;
+    $(".name", el).textContent = cl.isNew ? "+ New chat" : cl.item.title || "Untitled";
+    $(".meta", el).textContent = cl.isNew ? "start fresh" : when(cl.item.updated);
+    el.setAttribute("aria-label", cl.isNew ? "New chat" : `${cl.item.title}, ${when(cl.item.updated)}`);
+    el.addEventListener("click", () => openFromMap(cl.id));
+    hoverable(el, cl.key);
+    mapEl.appendChild(el);
+  }
+  const f = framed();
+  const w = document.createElement("div");
+  w.className = "sky-word map-word";
+  w.style.cssText = `left:${f.minX + 40}px;top:${f.minY - 60}px`;
+  w.textContent = `${projectName(state.projectId)}: your chats, newest first`;
+  mapEl.appendChild(w);
+}
+
+// ---- two levels up: every project is a cloud
+
 function buildSky() {
   if (!state.projects.length) return;
   SKY.g = skyLayout();
-  const last = state.docs[state.docs.length - 1];
-  SKY.origin = last ? { x: last.pos.x, y: last.pos.y } : { x: 0, y: 0 };
-  const { docW } = state.layout, tid = state.thread?.id || "";
-  SKY.clouds = state.docs.map((d, i) => {
-    const seed = hashStr(tid + ":" + i);
-    return { kind: "doc", d, puffs: cloudPuffs(seed, docW * 1.15, docW * 0.52), ph: (seed % 628) / 100, depth: 0.8 + (i % 3) * 0.15, hov: 0 };
-  });
   const g = SKY.g;
-  for (const p of [...g.personal, ...g.bank]) {
+  SKY.clouds = [...g.personal, ...g.bank].map((p) => {
     const [w, h] = g.size[p.id], seed = hashStr(p.id);
-    SKY.clouds.push({
-      kind: "proj", id: p.id, c: skyToWorld(g.pos[p.id]), ghost: !!p.ghost,
+    return {
+      kind: "proj", key: "proj:" + p.id, id: p.id, c: skyToWorld(g.pos[p.id]), ghost: !!p.ghost,
       puffs: cloudPuffs(seed, w * SKY.K, h * SKY.K), ph: (seed % 628) / 100,
       depth: p.group === "client" || p.ghost ? 1.3 : 0.85 + (seed % 3) * 0.12, hov: 0,
-    });
-  }
+    };
+  });
   renderSkyLabels();
 }
 
@@ -1093,13 +1095,11 @@ function renderSkyLabels() {
     el.innerHTML = `<span class="name"></span><span class="meta"></span>`;
     $(".name", el).textContent = p.name;
     const n = p.threads?.length || 0;
-    $(".meta", el).textContent = p.ghost ? "add one in projects.json" : n ? `${n} thread${n === 1 ? "" : "s"} · ${ago(p.threads[0].updated)}` : "start here";
+    $(".meta", el).textContent = p.ghost ? "add one in projects.json" : n ? `${n} chat${n === 1 ? "" : "s"} · ${when(p.threads[0].updated)}` : "start here";
     if (!p.ghost) {
       el.setAttribute("aria-label", `${p.name}, ${$(".meta", el).textContent}`);
       el.addEventListener("click", () => enterProject(p.id));
-      const on = () => (SKY.hover = p.id), off = () => { if (SKY.hover === p.id) SKY.hover = null; };
-      el.addEventListener("pointerenter", on); el.addEventListener("focus", on);
-      el.addEventListener("pointerleave", off); el.addEventListener("blur", off);
+      hoverable(el, "proj:" + p.id);
     }
     skyEl.appendChild(el);
   }
@@ -1215,6 +1215,24 @@ void main() {
   o = vec4(col, 1.);
 }`;
 
+// In a chat the sky prints deeper, so white letters read even at noon, and a
+// few clouds drift in the margins. Up among the clouds it is the day's own sky.
+const DEEP = [38, 66, 122];
+const AMBIENT = [
+  { fx: 0.075, fy: 0.34, w: 0.19, seed: 3 },
+  { fx: 0.93, fy: 0.6, w: 0.21, seed: 8 },
+  { fx: 0.86, fy: 0.17, w: 0.11, seed: 13 },
+  { fx: 0.13, fy: 0.83, w: 0.13, seed: 21 },
+];
+let ambient = [];
+function buildAmbient() {
+  const vw = innerWidth;
+  // only where there is sky to spare beside the chat
+  ambient = vw < 1180 ? [] : AMBIENT.map((a) => {
+    const W = a.w * vw, H = W * 0.46;
+    return { ...a, puffs: cloudPuffs(a.seed, W, H), ph: a.seed * 0.7 };
+  });
+}
 
 function ground() {
   const cv = $("#ground");
@@ -1239,8 +1257,7 @@ function ground() {
   let P1, P2;
   try { P1 = compile(FS_CELLS); P2 = compile(FS_PRINT); } catch (e) {
     console.warn("Sky shader failed, printing paper only:", e);
-    // this canvas is spoken for by WebGL now; paper needs a fresh one
-    const fresh = cv.cloneNode();
+    const fresh = cv.cloneNode(); // this canvas is spoken for by WebGL now
     cv.replaceWith(fresh);
     return paperOnly(fresh);
   }
@@ -1290,6 +1307,7 @@ function ground() {
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cells, 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    buildAmbient();
     last = "";
   };
   let scene, light, sceneT = -Infinity, last = "", lastDraw = 0, hour = 12;
@@ -1304,56 +1322,61 @@ function ground() {
     if (now - sceneT > 30000) {
       hour = hourNow();
       scene = sceneAt(hour); light = lightAt(hour); sceneT = now; last = "";
-      document.body.classList.toggle("night", scene.dens > 0.6);
+      state.night = scene.dens > 0.6;
+      syncChrome();
       const rs = document.documentElement.style;
       rs.setProperty("--sx", light.sx.toFixed(3));
       rs.setProperty("--sy", light.sy.toFixed(3));
       rs.setProperty("--sa", light.sa.toFixed(2));
     }
-    const c = state.cam, L = state.layout, s = c.s;
+    const c = state.cam, L = state.layout, s = c.s, k = state.chatK;
     const lw = levelW(s);
-    const pres = (1 - smooth(0.38, 0.85, s)) * (state.holdNear ? 0.45 : 1);
-    const dens = scene.sky * pres;
+    const dens = scene.sky * (1 - k) + Math.max(scene.sky, 0.72) * k;
     let hovering = false;
-    for (const cl of SKY.clouds) {
-      const want = cl.id && cl.id === SKY.hover ? 1 : 0;
+    for (const cl of [...MAP.clouds, ...SKY.clouds]) {
+      const want = cl.key === SKY.hover ? 1 : 0;
       if (Math.abs(cl.hov - want) > 0.004) { cl.hov += (want - cl.hov) * (reduceMotion ? 1 : 0.12); hovering = true; }
     }
-    const key = [c.x, c.y, c.s, c.r, L.cx, L.cy].map((v) => (v || 0).toFixed(2)).join();
+    const key = [c.x, c.y, c.s, c.r, L.cx, L.cy, k].map((v) => (v || 0).toFixed(3)).join();
     const alive = dens > 0.002 && !reduceMotion && now - lastDraw > 50;
     if (key === last && !alive && !hovering) return;
     last = key; lastDraw = now;
 
     // world → screen, exactly as #world is transformed
     const th = (-c.r * Math.PI) / 180, co = Math.cos(th), si = Math.sin(th);
-    const t = reduceMotion ? 0 : now / 1000;
+    const t = reduceMotion ? 0 : now / 1000, TAU = Math.PI * 2;
     const vw = L.vw, vh = L.vh;
-    const fill = (arr, list, infl) => {
-      let n = 0, rs = 0;
-      for (const cl of list) {
-        const cx0 = cl.kind === "doc" ? cl.d.pos.x : cl.c.x, cy0 = cl.kind === "doc" ? cl.d.pos.y : cl.c.y;
-        const k = infl * (1 + 0.07 * cl.hov) * (1 + 0.012 * Math.sin((t * 2 * Math.PI) / 41 + cl.ph));
-        const dx = 5 * cl.depth * Math.sin((t * 2 * Math.PI) / (200 * cl.depth) + cl.ph), dy = 2 * Math.sin((t * 2 * Math.PI) / 290 + cl.ph * 1.7);
-        for (const pf of cl.puffs) {
-          if (n >= 64) break;
-          const wx = cx0 + pf.x * k - c.x, wy = cy0 + pf.y * k - c.y;
-          const x = L.cx + s * (wx * co - wy * si) + dx, y = L.cy + s * (wx * si + wy * co) + dy, r = pf.r * k * s;
-          if (r < 0.8 || x < -r || y < -r || x > vw + r || y > vh + r) continue;
-          arr.set([x, y, r, pf.w * (cl.ghost ? 0.72 : 1)], n * 4);
-          rs += r; n++;
-        }
-      }
-      return [n, n ? (rs / n) * 0.2 : 0];
+    const put = (arr, st, x, y, r, w) => {
+      if (st.n >= 64 || w < 0.004 || r < 0.8 || x < -r || y < -r || x > vw + r || y > vh + r) return;
+      arr.set([x, y, r, w], st.n * 4);
+      st.rs += r; st.n++;
     };
-    let nA = 0, nB = 0, offA = 0, offB = 0;
+    const cloudAt = (arr, st, cl, cx0, cy0, infl, wgt) => {
+      const kk = infl * (1 + 0.07 * cl.hov) * (1 + 0.012 * Math.sin((t * TAU) / 41 + cl.ph));
+      const dx = 5 * cl.depth * Math.sin((t * TAU) / (200 * cl.depth) + cl.ph), dy = 2 * Math.sin((t * TAU) / 290 + cl.ph * 1.7);
+      for (const pf of cl.puffs) {
+        const wx = cx0 + pf.x * kk - c.x, wy = cy0 + pf.y * kk - c.y;
+        put(arr, st, L.cx + s * (wx * co - wy * si) + dx, L.cy + s * (wx * si + wy * co) + dy, pf.r * kk * s, pf.w * (cl.ghost ? 0.72 : 1) * wgt);
+      }
+    };
+    const stA = { n: 0, rs: 0 }, stB = { n: 0, rs: 0 };
     if (dens > 0.002) {
-      if (lw > 0.002) [nA, offA] = fill(A, SKY.clouds.filter((x) => x.kind === "doc"), 1 + 2.6 * smooth(0.28, 0.95, s));
-      if (lw < 0.998) [nB, offB] = fill(B, SKY.clouds.filter((x) => x.kind === "proj"), 1);
+      const mapClouds = () => { if (k < 0.996 && lw > 0.002) for (const cl of MAP.clouds) cloudAt(A, stA, cl, cl.x, cl.y, 1 + 1.4 * smooth(0.5, 1.3, s), 1 - k); };
+      const driftClouds = () => {
+        if (k < 0.004) return;
+        ambient.forEach((a, i) => {
+          const x0 = a.fx * vw + 22 * Math.sin((t * TAU) / 140 + a.ph), y0 = a.fy * vh + 6 * Math.sin((t * TAU) / 230 + i);
+          for (const pf of a.puffs) put(A, stA, x0 + pf.x, y0 + pf.y, pf.r, pf.w * k * 0.92);
+        });
+      };
+      if (k > 0.5) { driftClouds(); mapClouds(); } else { mapClouds(); driftClouds(); }
+      if (lw < 0.998) for (const cl of SKY.clouds) cloudAt(B, stB, cl, cl.c.x, cl.c.y, 1, 1);
     }
+    const offA = stA.n ? (stA.rs / stA.n) * 0.2 : 0, offB = stB.n ? (stB.rs / stB.n) * 0.2 : 0;
     const sl = Math.hypot(light.sx, light.sy) || 1;
-    const night = smooth(0.62, 0.8, scene.dens), skyOnly = 1 - lw;
+    const night = smooth(0.62, 0.8, scene.dens), skyOnly = (1 - lw) * (1 - k);
     // the sun crosses the sky with the hour; at night a moon is left unprinted
-    const arc = Math.max(0, Math.min(1, (hour - 6) / 12.5)), topH = SKY.g?.topH || 60;
+    const arc = Math.max(0, Math.min(1, (hour - 6) / 12.5)), topH = L.topH || 60;
     const sunR = Math.min(vw, vh) * 0.034;
     const sun = [vw * (0.1 + 0.8 * arc), topH + (vh - topH) * (0.34 - 0.22 * Math.sin(Math.PI * arc)), sunR, skyOnly * (1 - night) * (dens > 0.002 ? 1 : 0)];
     const moon = [vw * 0.8, topH + (vh - topH) * 0.16, sunR * 0.85, skyOnly * night];
@@ -1365,8 +1388,8 @@ function ground() {
     gl.uniform2f(u1.uCell0, cell0[0], cell0[1]);
     gl.uniform1f(u1.uPitch, PITCH);
     gl.uniform2f(u1.uRot, ROTV[0], ROTV[1]);
-    gl.uniform4fv(u1.uA, A); gl.uniform1i(u1.uNA, nA);
-    gl.uniform4fv(u1.uB, B); gl.uniform1i(u1.uNB, nB);
+    gl.uniform4fv(u1.uA, A); gl.uniform1i(u1.uNA, stA.n);
+    gl.uniform4fv(u1.uB, B); gl.uniform1i(u1.uNB, stB.n);
     gl.uniform1f(u1.uW, lw);
     gl.uniform1f(u1.uT, t % 10000);
     gl.uniform1f(u1.uDens, dens);
@@ -1388,7 +1411,7 @@ function ground() {
     gl.uniform1f(u2.uPitch, PITCH);
     gl.uniform1f(u2.uDark, 0.13 + scene.dens * 0.12);
     gl.uniform3fv(u2.uPaper, mix(PAPER, scene.ink, scene.dens * 0.42).map((v) => v / 255));
-    gl.uniform3fv(u2.uBlue, scene.blue.map((v) => v / 255));
+    gl.uniform3fv(u2.uBlue, mix(scene.blue, DEEP, 0.4 * k).map((v) => v / 255));
     gl.uniform3fv(u2.uGraph, GRAPHITE.map((v) => v / 255));
     gl.uniform3fv(u2.uRed, RED.map((v) => v / 255));
     // The paper's fibres belong to the world: they slide, turn and scale with the camera.
@@ -1404,7 +1427,7 @@ function ground() {
   requestAnimationFrame(frame);
 }
 
-// Without WebGL 2: the bare paper and its light, no sky.
+// Without WebGL 2: flat paper up among the clouds, a flat blue in a chat.
 function paperOnly(cv) {
   const ctx = cv.getContext("2d");
   let W, H, dpr, washiPat, last = "", sceneT = -Infinity, scene, light;
@@ -1421,76 +1444,165 @@ function paperOnly(cv) {
     if (now - sceneT > 30000) {
       const hr = hourNow();
       scene = sceneAt(hr); light = lightAt(hr); sceneT = now; last = "";
-      document.body.classList.toggle("night", scene.dens > 0.6);
+      state.night = scene.dens > 0.6;
+      syncChrome();
       const rs = document.documentElement.style;
       rs.setProperty("--sx", light.sx.toFixed(3)); rs.setProperty("--sy", light.sy.toFixed(3)); rs.setProperty("--sa", light.sa.toFixed(2));
     }
-    const c = state.cam, { cx = 0, cy = 0 } = state.layout;
-    const key = [c.x, c.y, c.s, c.r, cx, cy].map((v) => v.toFixed(2)).join();
+    const c = state.cam, { cx = 0, cy = 0 } = state.layout, k = state.chatK;
+    const key = [c.x, c.y, c.s, c.r, cx, cy, k].map((v) => v.toFixed(2)).join();
     if (key === last) return;
     last = key;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = rgb(mix(PAPER, scene.ink, scene.dens * 0.42));
+    const paper = mix(PAPER, scene.ink, scene.dens * 0.42);
+    ctx.fillStyle = rgb(mix(mix(paper, scene.blue, scene.sky * 0.5), mix(scene.blue, DEEP, 0.4), k));
     ctx.fillRect(0, 0, W, H);
     const fs = Math.max(0.55, c.s);
     washiPat.setTransform(new DOMMatrix().translate(cx * dpr, cy * dpr).scale(fs * dpr).rotate(-c.r).translate(-c.x * (c.s / fs), -c.y * (c.s / fs)));
-    ctx.globalAlpha = 0.55; ctx.fillStyle = washiPat; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1;
+    ctx.globalAlpha = 0.35; ctx.fillStyle = washiPat; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1;
   };
   requestAnimationFrame(frame);
 }
 
 // ---------------------------------------------------------------- moving between levels
-// O rises one level: doc → its thread's clouds → the sky of all projects.
-// Diving back down is the same camera, the other way.
+// O rises one level: a chat → this project's chats as clouds → every project.
+// Clicking a cloud dives back down through the same camera.
 
 async function loadProjects() {
   state.projects = await api("/api/projects");
   return state.projects;
 }
 
-function setView(v) {
-  state.view = v;
-  document.body.classList.toggle("sky", v === "sky");
+const chatCloud = () => (state.thread?.id && state.thread.projectId === state.projectId && MAP.byId[state.thread.id]) || MAP.newCloud;
+
+function leaveChat() {
+  hidePopover();
+  closeDrawer();
+  $("#notes-panel").classList.remove("open");
+  input.blur();
+}
+
+function zoomOut() {
+  if (state.view === "chat") return showChats();
+  if (state.view === "chats") return showSky();
+}
+
+async function showChats(pid = state.projectId) {
+  if (state.view === "sky") return enterProject(pid);
+  leaveChat();
+  const fromChat = state.view === "chat";
+  const switching = pid !== state.projectId;
+  state.projectId = pid;
+  await loadProjects().catch(() => {});
+  buildMap();
+  if (fromChat) {
+    // start just over the chat you were in, then rise until its neighbours come into view
+    const cl = switching ? MAP.newCloud : chatCloud();
+    Object.assign(state.cam, { x: cl.x, y: cl.y, s: 1.1, r: 0 });
+    applyCam();
+  }
+  setView("chats");
+  await Promise.all([tweenChatK(0, 650), flyTo(camForChats(), { dip: !fromChat, duration: reduceMotion ? 1 : fromChat ? 1500 : undefined })]);
 }
 
 async function showSky() {
   if (state.view === "sky") return;
-  hidePopover();
-  closeDrawer();
-  $("#notes-panel").classList.remove("open");
+  leaveChat();
+  const fromChat = state.view === "chat";
   await loadProjects().catch(() => {});
-  buildSky();
+  buildMap();
   if (!SKY.g) return;
-  state.overview = false;
-  document.body.classList.remove("overview");
-  $("#btn-overview").classList.remove("active");
-  setView("sky");
-  updateNav();
-  await flyTo(camForSky(), { dip: false, duration: reduceMotion ? 1 : 2400 });
-}
-
-async function enterProject(pid, threadId) {
-  const proj = state.projects.find((p) => p.id === pid);
-  const target = threadId && (!proj || proj.threads.some((t) => t.id === threadId)) ? threadId : proj?.threads?.[0]?.id;
-  if (pid === state.projectId && state.thread && (!target || target === state.thread.id)) {
-    setView("thread");
-    return focusDoc(state.docs.length - 1, { duration: reduceMotion ? 1 : 2600, dip: false });
+  if (fromChat) {
+    const cl = chatCloud();
+    Object.assign(state.cam, { x: cl.x, y: cl.y, s: 1.1, r: 0 });
+    applyCam();
   }
-  // Drift over to that cloud, then sink into it.
-  const cl = SKY.clouds.find((x) => x.id === pid);
-  if (cl && !reduceMotion) await flyTo({ x: cl.c.x, y: cl.c.y, s: SKY.g.sSky * 2.6, r: 0 }, { dip: false, duration: 1300 });
-  state.projectId = pid;
-  if (target) await openThread(target, { from: "sky" });
-  else await newThread(pid, { from: "sky" });
+  setView("sky");
+  await Promise.all([tweenChatK(0, 650), flyTo(camForSky(), { dip: false, duration: reduceMotion ? 1 : 2400 })]);
 }
 
-// ---------------------------------------------------------------- overview pan / zoom
+// Drift over to a project's cloud, sink into it, and its chats open out below.
+async function enterProject(pid) {
+  const cl = SKY.clouds.find((x) => x.id === pid);
+  if (cl && SKY.g && !reduceMotion) await flyTo({ x: cl.c.x, y: cl.c.y, s: SKY.g.sSky * 2.6, r: 0 }, { dip: false, duration: 1300 });
+  const s = state.cam.s;
+  state.projectId = pid;
+  buildMap(); // the world re-centres: this project's cloud now sits over its chats
+  Object.assign(state.cam, { x: SKY.origin.x, y: SKY.origin.y, s, r: 0 });
+  applyCam();
+  setView("chats");
+  await flyTo(camForChats(), { dip: false, duration: reduceMotion ? 1 : 1700 });
+}
+
+// Dive into a chat's cloud (or the "new chat" cloud) and the chat opens around you.
+async function openFromMap(id) {
+  const cl = id ? MAP.byId[id] : MAP.newCloud;
+  const load = id && id !== state.thread?.id ? api(`/api/threads/${id}`) : null;
+  if (cl) await flyTo({ x: cl.x, y: cl.y, s: 1.1, r: 0 }, { dip: false, duration: reduceMotion ? 1 : 1100 });
+  try {
+    if (!id) draftThread(state.projectId);
+    else if (load) {
+      state.thread = await load;
+      state.projectId = state.thread.projectId;
+      remember(id);
+      renderThread();
+    }
+  } catch (err) {
+    toast("Couldn't open that chat: " + err.message, true);
+    return;
+  }
+  setView("chat");
+  await tweenChatK(1, 700);
+  state.msgs.forEach(positionMarginalia);
+  if (!id) input.focus({ preventScroll: true });
+}
+
+// Esc / Enter up among the clouds: go back down where you came from.
+function diveBack() {
+  if (state.view === "sky") return enterProject(state.projectId);
+  if (state.view !== "chats") return;
+  const t = state.thread;
+  if (t && t.projectId === state.projectId) return openFromMap(t.id || null);
+  const latest = state.projects.find((p) => p.id === state.projectId)?.threads?.[0];
+  return openFromMap(latest?.id || null);
+}
+
+// A quick fade between chats without leaving the sky.
+async function swapFeed(fn) {
+  if (!reduceMotion) await feed.animate([{ opacity: 1 }, { opacity: 0, transform: "translateY(-12px)" }], { duration: 200, easing: "ease-in" }).finished;
+  await fn();
+  if (!reduceMotion) feed.animate([{ opacity: 0, transform: "translateY(16px)" }, { opacity: 1, transform: "none" }], { duration: 450, easing: "cubic-bezier(.25,.8,.25,1)" });
+}
+
+async function goToChat(id) {
+  if (state.view === "chat") {
+    if (id === state.thread?.id) return;
+    return swapFeed(() => openThread(id).catch((e) => toast("Couldn't open that chat: " + e.message, true)));
+  }
+  const t = state.projects.flatMap((p) => p.threads || []).find((x) => x.id === id);
+  if (state.view === "chats" && t?.projectId === state.projectId) return openFromMap(id);
+  await openThread(id).catch((e) => toast("Couldn't open that chat: " + e.message, true));
+  setView("chat");
+  await tweenChatK(1, 700);
+}
+
+async function newChat(pid = state.projectId) {
+  if (state.view === "chat") await swapFeed(() => draftThread(pid));
+  else if (state.view === "chats" && pid === state.projectId) return openFromMap(null);
+  else {
+    draftThread(pid);
+    setView("chat");
+    await tweenChatK(1, 700);
+  }
+  input.focus({ preventScroll: true });
+}
+
+// ---------------------------------------------------------------- pan / zoom among the clouds
 
 function overviewControls() {
-  const vp = $("#viewport");
-  const far = () => state.overview || state.view === "sky";
-  let drag = null;
-  vp.addEventListener("pointerdown", (e) => {
+  const far = () => state.view !== "chat";
+  let drag = null, suppressClick = false;
+  viewportEl.addEventListener("pointerdown", (e) => {
     if (!far() || e.button !== 0 || flight) return;
     drag = { x: e.clientX, y: e.clientY, cam: { ...state.cam }, moved: false };
   });
@@ -1503,42 +1615,31 @@ function overviewControls() {
     applyCam();
   });
   addEventListener("pointerup", () => { if (drag?.moved) suppressClick = true; drag = null; setTimeout(() => (suppressClick = false), 0); });
-  let suppressClick = false;
-  vp.addEventListener("click", (e) => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); } }, true);
-  // One continuous zoom: scroll (or pinch) from a thread's clouds up into the sky and back.
+  viewportEl.addEventListener("click", (e) => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); } }, true);
+  // One continuous zoom: scroll or pinch from this project's chats up into the sky and back.
   let settle;
   addEventListener("wheel", (e) => {
-    if (e.target.closest?.("#drawer, #notes-panel, .doc-scroll, #composer")) {
-      if (!(e.ctrlKey && e.deltaY > 0 && !far())) return;
+    if (!far()) {
+      // in a chat, the wheel scrolls; a pinch outward rises out of it
+      if (e.ctrlKey && e.deltaY > 0) { e.preventDefault(); zoomOut(); }
+      return;
     }
-    if (far() && !flight) {
-      e.preventDefault();
-      const c = state.cam, L = state.layout;
-      const s1 = Math.max((SKY.g?.sSky || 0.02) * 0.75, Math.min(0.62, c.s * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018))));
-      // keep the point under the cursor still
-      const th = (-c.r * Math.PI) / 180, mx = (e.clientX - L.cx) , my = (e.clientY - L.cy);
-      const wx = (mx * Math.cos(th) + my * Math.sin(th)), wy = (-mx * Math.sin(th) + my * Math.cos(th));
-      c.x += wx / c.s - wx / s1; c.y += wy / c.s - wy / s1; c.s = s1;
-      applyCam();
-      const up = levelW(s1) < 0.5;
-      if (up && state.view !== "sky") { state.overview = false; document.body.classList.remove("overview"); buildSky(); setView("sky"); updateNav(); }
-      else if (!up && state.view === "sky") { setView("thread"); state.overview = true; document.body.classList.add("overview"); updateNav(); }
-      clearTimeout(settle);
-      // zoomed all the way in on a thread: land on the nearest sheet;
-      // all the way out: let the sky settle into frame
-      if (s1 >= 0.62 && e.deltaY < 0) settle = setTimeout(() => focusDoc(nearestDoc()), 160);
-      else if (s1 < (SKY.g?.sSky || 0) * 1.25 && SKY.g) settle = setTimeout(() => flyTo(camForSky(), { dip: false, duration: 900 }), 220);
-    } else if (e.ctrlKey && e.deltaY > 0 && state.view === "thread") {
-      e.preventDefault();
-      toggleOverview(true);
-    }
+    if (e.target.closest?.("#drawer, #notes-panel")) return;
+    e.preventDefault();
+    if (flight) return;
+    const c = state.cam, L = state.layout;
+    const s1 = Math.max((SKY.g?.sSky || 0.02) * 0.75, Math.min(0.9, c.s * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018))));
+    // keep the point under the cursor still
+    const th = (-c.r * Math.PI) / 180, mx = e.clientX - L.cx, my = e.clientY - L.cy;
+    const wx = mx * Math.cos(th) + my * Math.sin(th), wy = -mx * Math.sin(th) + my * Math.cos(th);
+    c.x += wx / c.s - wx / s1; c.y += wy / c.s - wy / s1; c.s = s1;
+    applyCam();
+    const up = levelW(s1) < 0.5;
+    if (up && state.view === "chats") setView("sky");
+    else if (!up && state.view === "sky") setView("chats");
+    clearTimeout(settle);
+    if (SKY.g && s1 < SKY.g.sSky * 1.25) settle = setTimeout(() => flyTo(camForSky(), { dip: false, duration: 900 }), 220);
   }, { passive: false });
-}
-
-function nearestDoc() {
-  let best = 0, bd = Infinity;
-  state.docs.forEach((d, i) => { const k = Math.hypot(d.pos.x - state.cam.x, d.pos.y - state.cam.y); if (k < bd) { bd = k; best = i; } });
-  return best;
 }
 
 // ---------------------------------------------------------------- voice
@@ -1580,13 +1681,11 @@ $("#btn-send").addEventListener("click", send);
 $("#btn-threads").addEventListener("click", openDrawer);
 $("#drawer-close").addEventListener("click", closeDrawer);
 $("#drawer-scrim").addEventListener("click", closeDrawer);
-$("#drawer-new").addEventListener("click", () => newThread());
-$("#btn-new").addEventListener("click", () => (state.view === "sky" ? null : newThread()));
-$("#brand").addEventListener("click", () => (state.view === "sky" ? enterProject(state.projectId, state.thread?.id) : showSky()));
-$("#drawer-river").addEventListener("click", () => { closeDrawer(); showSky(); });
-$("#btn-overview").addEventListener("click", zoomOut);
-$("#nav-prev").addEventListener("click", () => focusDoc(state.focus - 1));
-$("#nav-next").addEventListener("click", () => focusDoc(state.focus + 1));
+$("#drawer-sky").addEventListener("click", () => { closeDrawer(); showSky(); });
+$("#btn-new").addEventListener("click", () => newChat());
+$("#brand").addEventListener("click", () => (state.view === "sky" ? diveBack() : showSky()));
+$("#crumb-project").addEventListener("click", () => (state.view === "chat" ? showChats() : diveBack()));
+$("#btn-overview").addEventListener("click", () => (state.view === "sky" ? diveBack() : zoomOut()));
 $("#attach-chip").addEventListener("click", () => $("#notes-panel").classList.toggle("open"));
 $("#notes-close").addEventListener("click", () => $("#notes-panel").classList.remove("open"));
 $("#attach-clear").addEventListener("click", () => {
@@ -1609,22 +1708,21 @@ addEventListener("keydown", (e) => {
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
-  if (state.view === "sky") {
-    if (["Escape", "Enter", "o", "O"].includes(e.key)) enterProject(state.projectId, state.thread?.id);
+  if (e.key === "Escape" && $("#drawer").classList.contains("open")) return closeDrawer();
+  if (state.view !== "chat") {
+    if (e.key === "o") zoomOut();
+    else if (["Escape", "Enter", "i"].includes(e.key)) diveBack();
+    else if (e.key === "n") newChat();
+    else if (e.key === "t") openDrawer();
+    else if (e.key === "p") showSky();
     return;
   }
   // Type anywhere to start writing. Lowercase o, p, t, n stay shortcuts; a
   // capital (the start of a sentence) always goes to the composer.
-  if (e.key.length === 1 && !/^[otnp/]$/.test(e.key) && !state.overview) {
-    input.focus({ preventScroll: true });
-    return;
-  }
-  if (e.key === "ArrowRight") { e.preventDefault(); focusDoc(Math.min(state.docs.length - 1, state.focus + 1)); }
-  else if (e.key === "ArrowLeft") { e.preventDefault(); focusDoc(Math.max(0, state.focus - 1)); }
-  else if (e.key === "o") zoomOut();
-  else if (e.key === "Escape") { if (state.overview) toggleOverview(false); closeDrawer(); }
+  if (e.key.length === 1 && !/^[otnp/]$/.test(e.key)) { input.focus({ preventScroll: true }); return; }
+  if (e.key === "o") zoomOut();
   else if (e.key === "t") openDrawer();
-  else if (e.key === "n") newThread();
+  else if (e.key === "n") newChat();
   else if (e.key === "p") showSky();
   else if (e.key === "/") { e.preventDefault(); input.focus(); }
 });
@@ -1634,13 +1732,16 @@ addEventListener("resize", () => {
   clearTimeout(resizeT);
   resizeT = setTimeout(() => {
     measure();
-    placeDocs();
-    Object.assign(state.cam, state.view === "sky" && SKY.g ? camForSky() : state.overview ? camForOverview() : state.focus >= 0 ? camForDoc(state.focus) : state.cam);
+    if (state.projects.length) buildMap();
+    if (state.view === "chats") Object.assign(state.cam, camForChats());
+    else if (state.view === "sky" && SKY.g) Object.assign(state.cam, camForSky());
+    else { const cl = chatCloud(); if (cl) Object.assign(state.cam, { x: cl.x, y: cl.y, s: 1.1, r: 0 }); }
     applyCam();
+    state.msgs.forEach(positionMarginalia);
   }, 80);
 });
 
-// Chrome gets out of the way: after a few still seconds only the sheet remains.
+// Chrome gets out of the way: after a few still seconds only the sky and the chat remain.
 function quietChrome() {
   if (!matchMedia("(hover: hover)").matches) return;
   let t;
@@ -1656,7 +1757,10 @@ function quietChrome() {
 }
 
 async function boot() {
+  if (innerWidth <= 760) input.placeholder = "Say something";
   measure();
+  setChatK(0);
+  setView("chat");
   quietChrome();
   ground();
   overviewControls();
@@ -1671,13 +1775,20 @@ async function boot() {
     st.title = s.engine === "plan" ? `Running on your Claude plan via Claude Code. Tools: ${s.tools.join(", ")}` : s.engine === "api" ? `Claude API · ${s.model}` : "Demo mode: replies are canned. See README.";
   } catch {}
   await loadProjects().catch(() => {});
-  const list = await api("/api/threads");
+  const list = await api("/api/threads").catch(() => []);
   let last = null;
   try { last = localStorage.getItem("shell.lastThread"); } catch {}
   const pick = list.find((t) => t.id === last) || list[0];
   state.projectId = pick?.projectId || state.projects[0]?.id;
-  if (pick) await openThread(pick.id, { from: "boot" });
-  else await newThread(state.projectId, { from: "boot" });
+  if (pick) await openThread(pick.id);
+  else draftThread(state.projectId);
+  buildMap();
+  // Open just above this chat's cloud, then sink into it.
+  const cl = chatCloud();
+  if (cl) Object.assign(state.cam, { x: cl.x, y: cl.y, s: 1.1, r: 0 });
+  applyCam();
+  await tweenChatK(1, 1100);
+  state.msgs.forEach(positionMarginalia);
 }
 
 boot();

@@ -1,78 +1,81 @@
-# Shell — handoff (2026-11-17)
+# Shell — handoff (2026-11-18)
 
 Read this first in a new session. Then read `README.md`.
 
-## What Shell is
+## The vision (keep building toward this)
 
-Danny's own interface for talking with Claude. Every reply is a **document**
-on a canvas. He selects words and leaves notes or quick reactions
-(Yes / No / Why? / More), then sends them back in one batch. No copy-paste.
-The camera flies between docs (Prezi-style).
+Shell is Danny's **AI workspace as a physical table**: one beautiful, calm
+place where all his work with Claude lives, arranged in space so he can find it
+by where it is, not by searching.
+
+- **Usable first, beautiful on top.** It must work like a normal chat. The
+  look rides on top and never gets in the way. (The doc-canvas edition failed
+  this: lovely, but it didn't feel usable.)
+- **Altitude = scope.** In a chat you're down in the sky. Rise once: this
+  project's chats as clouds, newest first, with when he last talked. Rise
+  again: every project as a cloud, client work in its own bank.
+- **His clarity is the edge.** Selecting words and leaving notes makes precise
+  feedback effortless. Protect and deepen that.
+- **It gets smarter with him.** Standing context (`context/`), each repo's
+  CLAUDE.md/AGENTS.md, and `~/.claude/CLAUDE.md` carry what Claude learns about
+  how he works, so he never says it twice.
+- **Print, not screen.** Washi paper, halftone sky, four colours (paper,
+  graphite, one red, one sky blue), one light from the time of day.
 
 ## Where things stand
 
-- **Branch:** `claude/pensive-cray-5rgxbs` in `shell-ai-interface` (contains
-  all of `claude/great-bardeen-o9axhs` plus the sky edition). Nothing is merged
-  to `main` yet. No pull requests.
-- **Engine:** "plan" mode runs Claude Code headless (`claude -p
-  --output-format stream-json`) on Danny's Claude plan, no API key. Read-only
-  tools (`Read, Grep, Glob, WebSearch, WebFetch`). Each thread keeps its Claude
-  Code session id (`ccSession`) and resumes it. Also `api` and `demo` modes.
-  Re-tested end to end in a cloud container on 2026-11-17 (it read the repo and
-  streamed a doc back). **Not yet run on Danny's Mac.**
-- **Projects:** `projects.json` (from `projects.example.json`). Personal
-  projects share core repos via `--add-dir`. `group: "client"` projects sit in
-  a separate cloud bank and never get personal folders.
-- **Look: sky edition (2026-11-17).** The clouds-and-sky brief is built.
-  - One world, one camera: doc → **o** → the thread's docs as small clouds →
-    **o** → the sky with every project as a large cloud. Scroll/pinch zooms
-    through all of it continuously. The river view and lily pads are gone.
-  - The sky is printed on the GPU (`ground()` in `app.js`): pass 1 renders one
-    texel per halftone cell (blue ink, grey underside, cloudiness), pass 2
-    prints the dots at 15° over the washi, adds the red sun and the light.
-    Clouds are holes in the blue made of puffs (`cloudPuffs`); their edges are
-    the dots thinning out. Grey undersides face away from the one light.
-  - The project you are in floats over its latest doc (`SKY.origin`), so
-    diving into its cloud lands on that page. Switching projects flies to the
-    other cloud, then rebases the world onto the new thread (`openThread` with
-    `from: "sky"`). The thread clouds crossfade into the project clouds by
-    zoom level (`levelW`).
-  - Four colours: paper, graphite, one red, one sky blue. Sun by day (sky
-    view only), an unprinted moon at night. Dot density follows the hour.
-  - Boot opens on the sky, holds a beat, then dives into the last thread.
-  - Doc view is unchanged from the quiet edition.
-  - Checked at `?hour=10`, `17.5`, `22` and 1440, 1000, 390 wide, plus a
-    step-by-step scroll from overview to sky (no hard cuts).
-- **Keyboard:** the composer is no longer focused on load and lets go of focus
-  after sending, so shortcuts work. Shortcuts are lowercase (o, p, t, n); any
-  other key, including a capital, starts typing.
-
-## Code map
-
-- `server.js` — Node server, engines, SSE streaming, threads in
-  `data/threads/*.json`, projects.
-- `prompts/system.md` — "every reply is a document" rules + how notes arrive.
-- `public/app.js` — camera, docs, notes/highlights, composer, and the sky
-  (layout, clouds, two-pass WebGL 2 halftone in `ground()`).
-- `public/styles.css` — layered: base → nature theme → lily pads/river →
-  PRINT EDITION → CONTRAST PASS → QUIET EDITION → SKY (later blocks override
-  earlier ones; consolidate once the look is settled).
+- **Branch:** `claude/chat-in-the-sky` (from `claude/pensive-cray-5rgxbs`).
+  Nothing merged to `main`. No pull requests.
+- **Runs on Danny's Mac** (set up 2026-11-17): repos side by side in
+  `~/Developer`, Claude Code signed in (Pro), engine "plan", `npm start` on
+  http://localhost:4747.
+- **Chat in the sky (2026-11-18):**
+  - The chat is a normal scrolling column (`#chat`, `#feed`) over the GPU sky.
+    Danny's messages float in big white serif letters; shorter = bigger
+    (`sizeClass`). Replies are CSS clouds (`puffsFor`) holding the text.
+  - The composer is white lettering on the sky, on one ruled line at the
+    bottom. It steps down in size as the message grows (`autoGrow`).
+  - In a chat the sky prints deeper (`DEEP`) so white reads at noon, and a few
+    clouds drift in the margins on wide screens (`AMBIENT`).
+  - **o** rises: chat → this project's chats as clouds (`buildMap`, newest
+    first, "+ New chat" cloud first) → every project (`buildSky`). Clicking a
+    cloud dives back down. `chatK` fades the chat in and out.
+  - New chats are drafts until the first message (no more empty "New thread"
+    clutter). The server hides chats with no turns.
+  - Replies match the size of the message (short answer = no title). See
+    `prompts/system.md`.
+  - The drawer (**t**) lists every chat by project, like folders, with client
+    work in its own section.
+  - `styles.css` is now one consolidated theme (the old layered editions are
+    gone; see git history if needed).
+- Checked in the browser at 1440×900 and 375×812: chat, notes, zoom levels,
+  and a real message end to end.
 
 ## Danny's open decisions (ask one at a time)
 
-0. Sky edition: built. Danny hasn't seen it yet; get his reaction first.
-1. Text weight: right now, or one step heavier?
-2. Pencil margin: keep the date, or show the project name?
-3. Let Claude edit files from Shell? Proposal: a confirm button in the doc
+1. How does the new chat feel in daily use? Get his reaction first.
+2. Prezi-style type: sizes and placement that vary with meaning (he tabled
+   this for later).
+3. Let Claude edit files from Shell? Proposal: a confirm button in the reply
    before any change goes through.
+4. Merge `claude/chat-in-the-sky` to `main`?
+
+## Code map
+
+- `server.js` — Node server, engines, SSE streaming, chats in
+  `data/threads/*.json`, projects.
+- `prompts/system.md` — how Claude writes in Shell + how notes arrive.
+- `context/working-with-danny.md` — how Danny wants Claude to work with him
+  (added to every Shell chat).
+- `public/app.js` — chat, notes/highlights, composer, camera, map of clouds,
+  and the sky (two-pass WebGL 2 halftone in `ground()`).
+- `public/styles.css` — one theme.
 
 ## Next steps
 
-- Get it running on Danny's Mac (install Claude Code, `claude` login, clone
-  repos side by side, check out the branch, `npm install`, `npm start`).
-- Decide whether to merge the branch to `main`.
-- Consolidate `styles.css` into one theme.
-- Ideas: sent notes shown faded on old docs; v2 diff view; read aloud.
+- Keep Shell running without a terminal (a login item / launchd service).
+- Ideas: sent notes shown faded on old replies; v2 diff view; read aloud;
+  search across chats from the sky.
 
 ## Cross-project context (break silos)
 

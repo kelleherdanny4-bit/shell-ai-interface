@@ -1,16 +1,16 @@
 # Shell
 
-A doc-first, cinematic way to talk with Claude.
+Danny's AI workspace: a chat that lives in a printed sky.
 
-Every reply lands as a **document** on a big canvas. You react to it the way you
-would to a doc someone handed you: select words, leave a note or a quick
-reaction (Yes / No / Why? / More). Then hit Send, and all your notes go back
-together. No copy-paste.
+It reads like a normal chat, top to bottom. What you type floats in the blue in
+big white letters, like film credits; Claude's replies arrive as clouds. Select
+any words in a reply to leave a note or a quick reaction (Yes / No / Why? /
+More). Send, and all your notes go back together. No copy-paste.
 
-The camera flies between docs, Prezi-style. Zoom out and a pale blue sky is
-printed over the paper in halftone dots: each doc becomes a small cloud, and
-further up every project is a cloud of its own. Dive into a cloud and it opens
-out into the page. One world, one continuous zoom.
+Zoom out (**o**) and this project's chats become clouds, newest first, each with
+when you last talked. Zoom out again and every project is a cloud, with client
+work in its own bank. Dive into a cloud and it opens back into the chat. One
+world, one continuous zoom.
 
 ## Run it (on your Claude plan, no API key)
 
@@ -61,15 +61,14 @@ first run; it stays on your computer). Each one is a cloud in the sky.
 | Ask | Just start typing (or tap the mic). Enter sends. |
 | React to a line | Select text → **Note**, or **Y / X / W / M** for Yes / No / Why? / More |
 | React to a paragraph | Hover it, tap the **+** in the left margin |
-| Edit a note | Click its pencil text in the margin beside the doc. Hover it and tap **×** to erase |
+| Edit a note | Click its pencil text in the sky beside the reply. Hover it and tap **×** to erase |
 | Send notes | **Send**. Typed text goes along as "Also: …" |
-| Move between docs | **← →** or the dots in the top bar |
-| Zoom out | **o**: docs become clouds with just their titles. **o** again: the sky of all projects. Or scroll / pinch, all the way up and back down |
-| All projects | **p**, or click **Shell** in the top left. Click a cloud to dive in; **Enter** dives back into where you were |
-| Threads | **t** lists this project's threads, **n** starts a new one |
+| Zoom out | **o**: this project's chats as clouds, newest first. **o** again: every project. Or scroll / pinch, all the way up and back down |
+| All projects | **p**, or click **Shell** in the top left. Click a cloud to dive in; **Esc** or **Enter** goes back down where you were |
+| All chats | **t** lists every chat by project, like folders. **n** starts a new chat (saved once you say something) |
 
 Shortcuts are lowercase. A capital letter (the start of a sentence) always goes
-to the composer, so typing "Now…" never opens a new thread.
+to the composer, so typing "Now…" never opens a new chat.
 
 Unsent notes are saved in the browser, so a reload never loses them.
 
@@ -90,19 +89,22 @@ the moon and how deep the sky is printed all follow the real time of day.
 ## How it's built
 
 - `server.js`: tiny Node server. Runs Claude Code (or the API) per message,
-  stores threads in `data/threads/*.json`, streams replies over Server-Sent Events.
-- `prompts/system.md`: tells Claude every reply is a document, how notes
-  arrive, and how Danny likes to read.
-- `context/*.md`: standing knowledge added to every chat. Seed of the
-  "repo knowledge in every new chat" project.
-- `public/`: the app. No build step. `app.js` holds the camera, docs, notes,
-  composer, and the sky: a two-pass WebGL 2 shader that prints the halftone
-  (one texel per halftone cell, then the dots on the washi). Without WebGL 2
-  you get the bare paper and no sky.
+  stores chats in `data/threads/*.json`, streams replies over Server-Sent Events.
+  Empty chats are never listed.
+- `prompts/system.md`: how Claude writes in Shell (short replies stay short;
+  bigger ones become small documents) and how notes arrive.
+- `context/*.md`: standing knowledge added to every chat, including
+  `working-with-danny.md` (how Danny wants Claude to work with him).
+- `public/`: the app. No build step. `app.js` holds the chat, notes, the
+  camera and map of clouds, and the sky: a two-pass WebGL 2 shader that prints
+  the halftone (one texel per halftone cell, then the dots on the washi).
+  Without WebGL 2 you get flat colour and no clouds.
 
 ## Next ideas
 
-- Turn on edits per project, with a confirm step in the doc.
-- Show sent notes faded on the old doc, linked to the answer.
+- Prezi-style type: let the size and placement of words in the sky vary with
+  what they say, not just how long they are.
+- Turn on edits per project, with a confirm step in the reply.
+- Show sent notes faded on the old reply, linked to the answer.
 - Read replies aloud. Voice-only mode.
-- Side-by-side diff when Claude sends a v2 of a doc.
+- Side-by-side diff when Claude sends a v2.

@@ -1,772 +1,404 @@
-/* Shell — "quiet landscape" theme.
-   Paper documents floating over a living, time-of-day landscape. */
+/* Shell — the sky edition, chat in the sky.
+   One world printed on washi in halftone. Zoomed in, you are in a chat:
+   your words float in the blue in white letters, Claude's replies arrive as
+   clouds. Zoom out and the chats become clouds; further out, every project
+   is a cloud. Four colours: paper, graphite, one red, one sky blue. One
+   light source (--sx/--sy/--sa, set from the time of day in app.js). */
+
 :root {
-  --paper: #fbf8f1;
-  --paper-2: #f4efe4;
-  --ink: #2b2a26;
-  --ink-2: #5a5850;
-  --muted: #8b877a;
-  --line: rgba(60, 70, 50, 0.14);
-  --line-strong: rgba(60, 80, 55, 0.28);
-  --moss: #5f7d5a;
-  --moss-deep: #46613f;
-  --sage: #e5ece0;
-  --honey: #d9a441;
-  --honey-soft: rgba(242, 201, 104, 0.42);
-  --honey-strong: rgba(236, 184, 72, 0.7);
-  --frost: rgba(251, 248, 241, 0.78);
-  --danger: #b5543f;
-  --font-body: "Nunito Sans", system-ui, -apple-system, sans-serif;
-  --font-head: "Fraunces", Georgia, serif;
+  --paper: #f4efe4;
+  --paper-2: #e9e2d2;
+  --cloud: #fbf8f2;
+  --white: #fffdf7;
+  --ink: #1a1714;
+  --ink-2: #3f3832;
+  --muted: #7d7366;
+  --line: rgba(26, 23, 20, 0.12);
+  --line-strong: rgba(26, 23, 20, 0.24);
+  --shu: #cf4f36;
+  --shu-deep: #a93c27;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", system-ui, sans-serif;
+  --font-head: "Shippori Mincho", "Hiragino Mincho ProN", Georgia, serif;
+  --font-pencil: "Caveat", "Bradley Hand", cursive;
   --top-h: 60px;
   --composer-h: 150px;
   --notes-w: 320px;
-  --doc-h: 70vh;
+  --sx: 0.5; --sy: 0.6; --sa: 1;
+  --shade: 30 22 14;
+  --sky-shade: 18 32 68;
   --ease: cubic-bezier(0.25, 0.8, 0.25, 1);
-  --shadow: 0 1px 2px rgba(40, 45, 30, 0.06), 0 12px 28px -8px rgba(40, 45, 30, 0.18), 0 40px 80px -30px rgba(30, 40, 30, 0.35);
+  --lift: 0 0 0 .5px rgb(var(--shade) / .14), 0 1px 1px rgb(var(--shade) / .18), calc(var(--sx) * 10px) calc(var(--sy) * 14px) 26px -8px rgb(var(--shade) / .4);
+  /* white letters in the sky keep a soft blue shadow so they read by day */
+  --sky-letter: 0 1px 0 rgb(var(--sky-shade) / .28), 0 2px 22px rgb(var(--sky-shade) / .5);
   color-scheme: light;
 }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
-  background: #cfdcd6;
-  color: var(--ink);
-  font-family: var(--font-body);
-  overflow: hidden;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+  background: #2f4f86; color: var(--ink); font-family: var(--font-body);
+  overflow: hidden; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
 }
 button { font: inherit; color: inherit; cursor: pointer; }
-kbd {
-  font-family: var(--font-body); font-size: 0.82em; font-weight: 700; padding: 1px 7px; border-radius: 6px;
-  border: 1px solid var(--line-strong); color: var(--moss-deep); background: var(--sage);
-}
+kbd { font-family: var(--font-body); font-size: .82em; font-weight: 700; padding: 1px 7px; border-radius: 2px; border: 1px solid var(--line-strong); background: var(--paper-2); }
 
-/* ---------- landscape ---------- */
+/* ---------- the sky ---------- */
 #ground { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
-body::after { /* soft paper grain over everything */
-  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 1; opacity: .35; mix-blend-mode: soft-light;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
-}
 
-/* ---------- world ---------- */
+/* ---------- the map: clouds you can dive into ---------- */
 #viewport { position: fixed; inset: 0; z-index: 2; overflow: hidden; }
 #world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 #world.flying { will-change: transform; }
-#links { position: absolute; left: -20000px; top: -20000px; width: 40000px; height: 40000px; overflow: visible; pointer-events: none; }
-#links path.trail { fill: none; stroke: #fffaf0; stroke-opacity: 0.55; stroke-width: 3; stroke-dasharray: 1 16; stroke-linecap: round; animation: flow 6s linear infinite; }
-@keyframes flow { to { stroke-dashoffset: -34; } }
+#map, #sky { position: absolute; left: 0; top: 0; pointer-events: none; }
 
-/* ---------- documents: paper ---------- */
-.doc {
-  position: absolute;
-  width: var(--doc-w, 820px);
-  height: var(--doc-h);
-  display: flex; flex-direction: column;
-  background: var(--paper);
-  border-radius: 18px;
-  box-shadow: var(--shadow);
-  transition: opacity .9s var(--ease), box-shadow .6s var(--ease);
-  opacity: 0.55;
-  cursor: pointer;
+.map-cloud, .sky-cloud {
+  position: absolute; border: 0; padding: 0; background: none; outline: none;
+  display: grid; place-content: center; justify-items: center; text-align: center;
+  gap: calc(6px * var(--inv, 1)); cursor: pointer; pointer-events: none;
 }
-.doc.focused { opacity: 1; cursor: auto; box-shadow: 0 1px 2px rgba(40,45,30,.06), 0 18px 40px -10px rgba(40,45,30,.22), 0 60px 120px -40px rgba(30,40,30,.45); }
-body.overview .doc { opacity: 0.96; cursor: zoom-in; }
-body.overview .doc:hover { box-shadow: 0 0 0 6px rgba(255,250,235,.6), var(--shadow); }
-
-.doc-head {
-  display: flex; align-items: center; gap: 12px;
-  padding: 16px 28px 12px; border-bottom: 1px solid var(--line);
-  font-size: 12px; font-weight: 700; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; flex: none;
+body.view-chats .map-cloud, body.view-sky .sky-cloud:not(.ghost) { pointer-events: auto; }
+.map-cloud .name {
+  font-family: var(--font-head); font-weight: 700; color: var(--ink); line-height: 1.2; letter-spacing: .01em;
+  font-size: min(calc(18px * var(--inv, 1)), 50px); max-width: 82%; text-wrap: balance;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
-.doc-head .idx { color: var(--moss); }
-.doc-head .spacer { flex: 1; }
-.doc-head .prompt {
-  text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 13.5px; color: var(--ink-2);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%;
-}
-.doc-head .prompt b { color: #a8771c; font-weight: 700; }
-
-.doc-scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 34px 60px 64px; position: relative; scrollbar-width: thin; scrollbar-color: #cfc9b8 transparent; border-radius: 0 0 18px 18px; }
-.doc-scroll::-webkit-scrollbar { width: 8px; }
-.doc-scroll::-webkit-scrollbar-thumb { background: #d8d2c2; border-radius: 4px; }
-
-/* ---------- reading ---------- */
-.doc-body { font-size: 19px; line-height: 1.7; color: var(--ink); max-width: 64ch; position: relative; }
-.doc-body > * { position: relative; }
-.doc-body h1 {
-  font-family: var(--font-head); font-weight: 500; font-size: 42px; line-height: 1.12; letter-spacing: -0.01em;
-  margin: 0 0 20px; color: #23281f; font-variation-settings: "SOFT" 100, "opsz" 96;
-}
-.doc-body h2 { font-family: var(--font-head); font-weight: 500; font-size: 25px; margin: 40px 0 10px; color: #2c3527; font-variation-settings: "SOFT" 100; }
-.doc-body h3 { font-family: var(--font-head); font-weight: 500; font-size: 20px; margin: 28px 0 6px; color: var(--ink); }
-.doc-body p { margin: 0 0 16px; }
-.doc-body strong { color: #1f241b; font-weight: 800; }
-.doc-body em { color: var(--ink-2); }
-.doc-body a { color: var(--moss-deep); text-underline-offset: 3px; text-decoration-color: rgba(70,97,63,.4); }
-.doc-body ul, .doc-body ol { padding-left: 0; margin: 0 0 18px; list-style: none; }
-.doc-body li { position: relative; padding-left: 30px; margin: 7px 0; }
-.doc-body ul > li::before { content: ""; position: absolute; left: 8px; top: 0.66em; width: 8px; height: 8px; border-radius: 50% 0 50% 0; background: var(--moss); opacity: .75; transform: rotate(-20deg); }
-.doc-body ol { counter-reset: n; }
-.doc-body ol > li { counter-increment: n; }
-.doc-body ol > li::before { content: counter(n); position: absolute; left: 0; top: 0.2em; width: 21px; height: 21px; border-radius: 50%; background: var(--sage); color: var(--moss-deep); font-size: 12px; font-weight: 800; line-height: 21px; text-align: center; }
-.doc-body li > ul, .doc-body li > ol { margin: 4px 0 0; }
-/* The bottom line */
-.doc-body blockquote {
-  margin: 0 0 26px; padding: 18px 24px; border-radius: 14px;
-  background: linear-gradient(135deg, #eaf0e4, #f3f1e6);
-  border-left: 4px solid var(--moss);
-  font-family: var(--font-head); font-size: 22px; line-height: 1.45; color: #26301f; font-weight: 400; font-variation-settings: "SOFT" 100;
-}
-.doc-body blockquote p:last-child { margin-bottom: 0; }
-.doc-body blockquote ol, .doc-body blockquote ul { font-family: var(--font-body); font-size: 17px; }
-.doc-body code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.84em; padding: 2px 6px; border-radius: 6px; background: var(--paper-2); color: #4d4636; }
-.doc-body pre { background: var(--paper-2); border-radius: 12px; padding: 14px 16px; overflow-x: auto; font-size: 14px; line-height: 1.55; }
-.doc-body pre code { background: none; padding: 0; }
-.doc-body hr { border: 0; height: 1px; background: var(--line-strong); margin: 30px 0; }
-.doc-body table { border-collapse: collapse; width: 100%; margin: 0 0 18px; font-size: 16px; }
-.doc-body th, .doc-body td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; }
-.doc-body th { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--moss-deep); }
-
-/* Text appears like mist lifting */
-.materialize { animation: materialize 1.1s var(--ease) both; }
-@keyframes materialize {
-  0% { opacity: 0; filter: blur(6px); transform: translateY(8px); }
-  100% { opacity: 1; filter: none; transform: none; }
-}
-.caret { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-left: 6px; vertical-align: 0.05em; background: var(--honey); animation: glow 1.6s ease-in-out infinite; }
-@keyframes glow { 50% { opacity: .35; transform: scale(.7); } }
-
-/* Thinking */
-.thinking { display: grid; gap: 16px; padding-top: 6px; }
-.thinking .bar { height: 14px; border-radius: 7px; background: linear-gradient(90deg, #efeadf, #e2e9dc, #efeadf); background-size: 200% 100%; animation: shimmer 2.4s ease-in-out infinite; }
-.thinking .bar:nth-child(2) { width: 58%; height: 34px; }
-.thinking .bar:nth-child(3) { width: 92%; animation-delay: .2s; }
-.thinking .bar:nth-child(4) { width: 84%; animation-delay: .4s; }
-.thinking .bar:nth-child(5) { width: 70%; animation-delay: .6s; }
-.thinking .label { font-family: var(--font-head); font-style: italic; font-size: 16px; color: var(--moss); }
-@keyframes shimmer { 50% { background-position: -100% 0; } }
-
-/* Finish: a soft warm wash */
-.doc.sweep .doc-scroll::after {
-  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 160px; pointer-events: none;
-  background: linear-gradient(180deg, transparent, rgba(242,201,104,0.16), transparent);
-  animation: sweep 1.6s var(--ease) forwards;
-}
-@keyframes sweep { from { transform: translateY(-160px); } to { transform: translateY(var(--sweep-h, 800px)); opacity: 0; } }
-
-/* Paragraph "+" */
-.gutter {
-  position: absolute; left: -42px; top: 3px; width: 26px; height: 26px; border-radius: 50%;
-  border: 1px solid var(--line-strong); background: var(--paper); color: var(--moss);
-  display: grid; place-items: center; font-size: 17px; line-height: 1; opacity: 0; transition: opacity .2s, transform .2s, background .2s;
-  user-select: none; -webkit-user-select: none;
-}
-.gutter::before { content: "+"; }
-.doc.focused .doc-body > *:hover > .gutter, .gutter:focus-visible { opacity: 1; }
-.gutter:hover { transform: scale(1.1); background: var(--moss); color: var(--paper); }
-
-::highlight(note) { background-color: var(--honey-soft); }
-::highlight(note-active) { background-color: var(--honey-strong); }
-.doc-body ::selection { background: rgba(95, 125, 90, 0.25); }
-
-/* ---------- frosted chrome ---------- */
-.frost, #hud-top .pill, #notes-panel, .composer-row, #popover, #drawer, #toast, .edge-nav, .hud-btn {
-  backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2);
-}
-
-/* ---------- top ---------- */
-#hud-top {
-  position: fixed; top: 0; left: 0; right: 0; height: var(--top-h); z-index: 20;
-  display: flex; align-items: center; gap: 12px; padding: 0 16px;
-}
-#hud-top .pill { display: flex; align-items: center; gap: 12px; background: var(--frost); border-radius: 999px; padding: 6px 16px 6px 6px; box-shadow: 0 4px 18px -8px rgba(30,40,30,.35); min-width: 0; }
-.brand { font-family: var(--font-head); font-weight: 500; font-size: 19px; color: #25301f; display: flex; align-items: center; gap: 9px; letter-spacing: .01em; font-variation-settings: "SOFT" 100; }
-.brand-ring { width: 18px; height: 18px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff4cf, var(--honey) 70%); box-shadow: 0 0 12px rgba(217,164,65,.6); }
-.thread-title { font-size: 14px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 26vw; padding-left: 12px; border-left: 1px solid var(--line-strong); }
-#constellation { flex: 1; display: flex; justify-content: center; align-items: center; min-width: 0; overflow: hidden; }
-#constellation .track { display: flex; align-items: center; background: var(--frost); border-radius: 999px; padding: 4px 10px; box-shadow: 0 4px 18px -8px rgba(30,40,30,.35); }
-#constellation button { position: relative; width: 24px; height: 24px; border: 0; background: none; padding: 0; display: grid; place-items: center; flex: none; }
-#constellation button span { width: 7px; height: 7px; border-radius: 50%; background: #b9b4a5; transition: all .4s var(--ease); }
-#constellation button.on span { width: 11px; height: 11px; background: var(--moss); box-shadow: 0 0 0 3px rgba(95,125,90,.2); }
-#constellation button.has-notes span { background: var(--honey); }
-#constellation button:hover span { background: var(--moss-deep); }
-#constellation i { width: 14px; height: 1px; background: #cfc9b8; flex: none; }
-#constellation button[data-tip]:hover::after { content: attr(data-tip); position: absolute; top: 32px; left: 50%; transform: translateX(-50%); white-space: nowrap; background: var(--paper); padding: 5px 10px; border-radius: 8px; font-size: 13px; color: var(--ink); z-index: 5; box-shadow: var(--shadow); }
-.hud-right { display: flex; align-items: center; gap: 8px; }
-.hud-btn { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--frost); display: grid; place-items: center; transition: all .25s var(--ease); flex: none; box-shadow: 0 4px 18px -8px rgba(30,40,30,.35); }
-.hud-btn svg { width: 18px; height: 18px; stroke: var(--moss-deep); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.hud-btn:hover { background: var(--paper); transform: translateY(-1px); }
-.hud-btn.active { background: var(--moss); } .hud-btn.active svg { stroke: var(--paper); }
-#hud-top .pill .hud-btn { box-shadow: none; background: transparent; width: 34px; height: 34px; }
-#hud-top .pill .hud-btn:hover { background: var(--sage); }
-.status { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); background: var(--frost); border-radius: 999px; padding: 0 14px; height: 40px; box-shadow: 0 4px 18px -8px rgba(30,40,30,.35); }
-.status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--honey); }
-.status.live .dot { background: var(--moss); box-shadow: 0 0 0 3px rgba(95,125,90,.2); }
-.status .clock { color: var(--muted); font-weight: 600; padding-left: 8px; border-left: 1px solid var(--line-strong); }
-
-/* ---------- edge nav ---------- */
-.edge-nav { position: fixed; top: 50%; z-index: 15; width: 46px; height: 46px; margin-top: -23px; border-radius: 50%; border: 0; background: var(--frost); display: grid; place-items: center; transition: all .3s var(--ease); box-shadow: 0 6px 20px -8px rgba(30,40,30,.4); }
-.edge-nav svg { width: 20px; height: 20px; stroke: var(--moss-deep); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.edge-nav:hover { background: var(--paper); transform: scale(1.06); }
-.edge-nav.left { left: 18px; } .edge-nav.right { right: calc(var(--notes-w) + 34px); }
-.edge-nav[disabled] { opacity: 0; pointer-events: none; }
-
-/* ---------- notes panel ---------- */
-#notes-panel {
-  position: fixed; z-index: 18; right: 16px; top: calc(var(--top-h) + 8px); bottom: calc(var(--composer-h) - 40px); width: var(--notes-w);
-  background: var(--frost); border-radius: 18px; box-shadow: var(--shadow);
-  display: flex; flex-direction: column; overflow: hidden;
-}
-.panel-head { display: flex; align-items: center; gap: 10px; padding: 16px 18px 12px; flex: none; }
-.panel-head .label { font-family: var(--font-head); font-size: 19px; color: #25301f; font-variation-settings: "SOFT" 100; }
-.panel-head .count { font-size: 12px; font-weight: 800; color: #6b4a0e; background: #f6dc9c; border-radius: 10px; padding: 1px 9px; }
-.panel-close { margin-left: auto; width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--paper-2); font-size: 18px; line-height: 1; color: var(--ink-2); display: none; }
-#notes-list { flex: 1; overflow-y: auto; padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
-#notes-list:empty { display: none; }
-.notes-empty { padding: 4px 20px 18px; color: var(--ink-2); font-size: 15px; line-height: 1.6; }
-.notes-empty p { margin: 0 0 12px; }
-.gutter-demo { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line-strong); color: var(--moss); font-size: 13px; background: var(--paper); }
-.note-card { background: var(--paper); border-radius: 12px; padding: 12px 14px; box-shadow: 0 1px 2px rgba(40,45,30,.06), 0 6px 16px -8px rgba(40,45,30,.2); animation: materialize .7s var(--ease) both; position: relative; border-left: 4px solid var(--honey); }
-.note-card .q { font-family: var(--font-head); font-style: italic; font-size: 14px; color: var(--ink-2); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
-.note-card .n { margin-top: 6px; font-size: 15.5px; color: var(--ink); line-height: 1.45; white-space: pre-wrap; outline: none; border-radius: 4px; font-weight: 600; }
-.note-card .n:focus { background: var(--paper-2); }
-.note-card .meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11.5px; color: var(--muted); font-weight: 600; letter-spacing: .04em; }
-.note-card .del { margin-left: auto; background: none; border: 0; color: var(--muted); font-size: 12px; padding: 2px 4px; }
-.note-card .del:hover { color: var(--danger); }
-.note-card .doc-tag { color: #a8771c; }
-
-/* ---------- popover ---------- */
-#popover {
-  position: fixed; z-index: 40; background: rgba(251,248,241,.92); border-radius: 14px; padding: 6px;
-  box-shadow: 0 2px 4px rgba(40,45,30,.08), 0 18px 40px -10px rgba(40,45,30,.35); animation: pop .3s var(--ease);
-  max-width: calc(100vw - 32px);
-}
-@keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.97); } }
-.pop-quick { display: flex; gap: 2px; flex-wrap: wrap; }
-#popover button { border: 0; background: none; border-radius: 10px; padding: 8px 12px; font-size: 14.5px; font-weight: 600; color: var(--ink); white-space: nowrap; }
-#popover button:hover { background: var(--sage); }
-#popover button.primary { background: var(--moss); color: var(--paper); }
-#popover button.primary:hover { background: var(--moss-deep); }
-.pop-write { width: min(360px, calc(100vw - 48px)); padding: 4px; }
-#pop-input { width: 100%; resize: none; background: var(--paper); border: 1px solid var(--line-strong); border-radius: 10px; color: var(--ink); font: 15.5px/1.45 var(--font-body); padding: 9px 11px; outline: none; }
-#pop-input:focus { border-color: var(--moss); }
-.pop-row { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
-.pop-row .hint { font-size: 12px; color: var(--muted); }
-
-/* ---------- composer ---------- */
-#composer { position: fixed; z-index: 25; left: 50%; bottom: 18px; transform: translateX(-50%); width: min(860px, calc(100vw - 32px)); }
-body.wide #composer { left: calc((100vw - var(--notes-w) - 16px) / 2); }
-.composer-row {
-  display: flex; align-items: flex-end; gap: 10px; padding: 9px 9px 9px 12px;
-  background: rgba(251,248,241,.86); border-radius: 26px;
-  box-shadow: 0 2px 4px rgba(40,45,30,.06), 0 20px 50px -14px rgba(30,40,30,.45);
-  transition: box-shadow .4s var(--ease);
-}
-.composer-row:focus-within { box-shadow: 0 0 0 4px rgba(95,125,90,.18), 0 20px 50px -14px rgba(30,40,30,.45); }
-#input { flex: 1; resize: none; background: none; border: 0; outline: none; color: var(--ink); font: 17.5px/1.5 var(--font-body); padding: 9px 4px; max-height: 30vh; min-height: 44px; }
-#input::placeholder { color: var(--muted); }
-#btn-send { height: 44px; padding: 0 22px; border-radius: 22px; border: 0; background: var(--moss); color: var(--paper); font-weight: 700; font-size: 15.5px; flex: none; transition: transform .2s var(--ease), background .2s; }
-#btn-send:hover { background: var(--moss-deep); transform: translateY(-1px); }
-#btn-send[disabled] { opacity: .45; transform: none; }
-#btn-mic { height: 44px; width: 44px; box-shadow: none; background: var(--paper-2); }
-#btn-mic.listening { background: #e8b4a6; }
-.composer-meta { text-align: center; font-size: 12px; font-weight: 600; color: rgba(255,252,242,.92); text-shadow: 0 1px 6px rgba(20,30,20,.6); margin-top: 9px; letter-spacing: .02em; }
-#attach { position: absolute; left: 0; right: 0; bottom: calc(100% + 10px); display: flex; justify-content: center; align-items: center; gap: 8px; }
-#attach[hidden] { display: none; }
-#attach-chip { border: 0; background: #f6dc9c; color: #5a3e0a; border-radius: 20px; padding: 7px 16px; font-size: 14px; font-weight: 600; animation: pop .4s var(--ease); box-shadow: 0 6px 18px -8px rgba(90,62,10,.5); }
-#attach-chip .attach-count { font-weight: 800; }
-#attach-clear { border: 0; background: rgba(251,248,241,.8); color: var(--ink-2); font-size: 12.5px; border-radius: 14px; padding: 5px 10px; }
-
-/* Orb: a small sun that breathes; ripples while thinking */
-#orb { position: relative; width: 44px; height: 44px; flex: none; }
-#orb span { position: absolute; border-radius: 50%; }
-#orb .core { inset: 12px; background: radial-gradient(circle at 38% 35%, #fff6d8, #f0c45e 55%, #d9a441); box-shadow: 0 0 14px rgba(217,164,65,.55); animation: breathe 5s ease-in-out infinite; }
-#orb .r1, #orb .r2 { inset: 12px; border: 1.5px solid rgba(217,164,65,.55); opacity: 0; }
-body.busy #orb .r1 { animation: ripple 2.4s ease-out infinite; }
-body.busy #orb .r2 { animation: ripple 2.4s ease-out 1.2s infinite; }
-body.busy #orb .core { animation-duration: 2.4s; }
-body.listening #orb .core { background: radial-gradient(circle at 38% 35%, #ffe9e2, #e39a85 60%, #c4705a); }
-@keyframes breathe { 50% { transform: scale(0.82); } }
-@keyframes ripple { 0% { transform: scale(1); opacity: .8; } 100% { transform: scale(2.1); opacity: 0; } }
-
-/* ---------- drawer ---------- */
-#drawer { position: fixed; z-index: 50; left: 0; top: 0; bottom: 0; width: min(340px, 86vw); background: rgba(251,248,241,.94); transform: translateX(-102%); transition: transform .6s var(--ease); display: flex; flex-direction: column; }
-#drawer.open { transform: none; box-shadow: 30px 0 80px rgba(30,40,30,.3); }
-#drawer .panel-close { display: grid; place-items: center; }
-#drawer-scrim { position: fixed; inset: 0; z-index: 45; background: rgba(40,50,40,.25); }
-.drawer-new { margin: 6px 14px 12px; padding: 12px; border-radius: 14px; border: 1.5px dashed var(--line-strong); background: transparent; color: var(--moss-deep); font-weight: 700; }
-.drawer-new:hover { background: var(--sage); }
-#thread-list { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
-.thread-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; background: none; border-radius: 12px; padding: 12px 14px; color: var(--ink); }
-.thread-item:hover { background: var(--paper-2); }
-.thread-item.on { background: var(--sage); }
-.thread-item .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 15.5px; font-weight: 600; }
-.thread-item .m { font-size: 12px; color: var(--muted); }
-
-/* ---------- toast ---------- */
-#toast { position: fixed; z-index: 60; left: 50%; top: 76px; transform: translate(-50%, -16px); opacity: 0; pointer-events: none; background: rgba(251,248,241,.94); padding: 11px 18px; border-radius: 14px; font-size: 14.5px; transition: all .5s var(--ease); max-width: calc(100vw - 32px); box-shadow: var(--shadow); }
-#toast.show { opacity: 1; transform: translate(-50%, 0); }
-#toast.err { color: var(--danger); }
-
-/* ---------- narrow screens ---------- */
-@media (max-width: 1199px) {
-  #notes-panel { left: 12px; right: 12px; width: auto; top: auto; bottom: calc(var(--composer-h) - 30px); max-height: 52vh; transform: translateY(calc(100% + 220px)); transition: transform .5s var(--ease); }
-  #notes-panel.open { transform: none; }
-  .panel-close { display: grid; place-items: center; }
-  .edge-nav.right { right: 18px; }
-}
-@media (max-width: 760px) {
-  :root { --top-h: 56px; }
-  .thread-title, .status .clock, .status .status-text, #constellation { display: none; }
-  .status { width: 40px; padding: 0; justify-content: center; }
-  .hud-right { margin-left: auto; }
-  .edge-nav { display: none; }
-  .doc-head { padding: 14px 20px 10px; }
-  .doc-scroll { padding: 24px 22px 48px; }
-  .doc-body { font-size: 17.5px; }
-  .doc-body h1 { font-size: 31px; }
-  .doc-body h2 { font-size: 21px; }
-  .doc-body blockquote { font-size: 19px; padding: 14px 18px; }
-  .gutter { display: none; }
-  .doc-head .prompt { display: none; }
-  .composer-meta { display: none; }
-  #composer { bottom: 10px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
-}
-
-/* ---- header crumbs ---- */
-.brand { border: 0; background: none; padding: 0; cursor: pointer; }
-.brand:hover { color: var(--moss-deep); }
-.crumbs { display: flex; align-items: center; min-width: 0; padding-left: 12px; border-left: 1px solid var(--line-strong); gap: 8px; }
-.crumbs .thread-title { border: 0; padding: 0; }
-.crumb-project { font-size: 13px; font-weight: 800; color: var(--moss-deep); white-space: nowrap; }
-.crumb-project:not(:empty)::after { content: "›"; margin-left: 8px; color: var(--muted); font-weight: 400; }
-.drawer-river { margin: -4px 14px 10px; padding: 10px; border-radius: 12px; border: 0; background: transparent; color: var(--ink-2); font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
-
-/* ---- Claude Code activity while thinking ---- */
-.thinking .activity { display: grid; gap: 4px; margin-top: 6px; font-size: 14.5px; color: var(--ink-2); }
-.thinking .activity div { animation: materialize .6s var(--ease) both; }
-.thinking .activity div::before { content: "· "; color: var(--moss); font-weight: 800; }
-
-@media (max-width: 760px) { .crumbs { display: none; } }
-
-body.sky .crumbs { display: none; }
-
-/* =================================================================
-   PRINT EDITION
-   Inspired by printmaking: handmade paper, flat woodblock colour with
-   visible grain, halftone dots, colours printed slightly out of register,
-   and a pencilled date in the margin. Overrides the rules above.
-   ================================================================= */
-:root {
-  --paper: #f4efe4;
-  --paper-2: #e9e2d2;
-  --ink: #26221e;
-  --ink-2: #554d45;
-  --muted: #958b7d;
-  --line: rgba(38, 34, 30, 0.12);
-  --line-strong: rgba(38, 34, 30, 0.24);
-  --shu: #cf4f36;        /* vermilion: seal, sun, send */
-  --shu-deep: #a93c27;
-  --sakura: #e9b9b2;     /* pale pink block */
-  --sora: #a9c1cf;       /* pale sky block */
-  --wakaba: #adc08f;     /* young-leaf green */
-  --ochre: #d9ad5f;
-  --moss: #556b4a;
-  --moss-deep: #3f5236;
-  --sage: #e3e6d6;
-  --honey-soft: rgba(233, 162, 150, 0.45);
-  --honey-strong: rgba(214, 112, 95, 0.55);
-  --frost: rgba(244, 239, 228, 0.95);
-  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", system-ui, sans-serif;
-  --font-head: "Shippori Mincho", "Hiragino Mincho ProN", Georgia, serif;
-  --font-pencil: "Caveat", "Bradley Hand", cursive;
-  --shadow: 0 1px 1px rgba(40, 32, 20, 0.08), 0 14px 30px -14px rgba(40, 32, 20, 0.35);
-}
-body { background: #efe9db; }
-body::after { display: none; } /* the canvas prints its own paper now */
-
-/* Paper surfaces: every panel is a sheet of washi */
-.doc, #notes-panel, .composer-row, #popover, #drawer, #toast, .note-card, #hud-top .pill, .hud-btn, .status, #constellation .track, .edge-nav, #attach-clear, #pop-input {
-  background-color: var(--paper);
-  background-image: var(--washi);
-  backdrop-filter: none; -webkit-backdrop-filter: none;
-}
-
-/* ---- the doc: a print on a sheet ---- */
-.doc { border-radius: 3px; box-shadow: var(--shadow); }
-/* a flat colour block printed behind the sheet, slightly off-register */
-.doc { --block: rgba(233,185,178,.9); }
-.doc:nth-child(3n+2) { --block: rgba(169,193,207,.9); }
-.doc:nth-child(3n+3) { --block: rgba(173,192,143,.9); }
-.doc.focused { box-shadow: 16px 13px 0 var(--block), 0 26px 50px -22px rgba(40,32,20,.45); }
-body.far .doc.focused { box-shadow: none; }
-
-.doc-head { padding: 18px 56px 12px; border-bottom: 0; font-family: var(--font-body); font-size: 11px; letter-spacing: .22em; color: var(--muted); }
-.doc-head .idx { color: var(--shu); font-weight: 700; }
-.doc-head .prompt { font-family: var(--font-body); color: var(--ink-2); }
-.doc-head .prompt b { color: var(--shu-deep); }
-.doc-scroll { padding: 18px 64px 70px; border-radius: 0; scrollbar-color: #cfc5b1 transparent; }
-
-/* pencil inscription in the bottom margin */
-.inscription {
-  flex: none; display: flex; justify-content: space-between; align-items: baseline;
-  padding: 6px 30px 12px; font-family: var(--font-pencil); font-size: 19px; color: #8a8174; letter-spacing: .01em;
-  border-top: 1px solid var(--line); transition: opacity .6s var(--ease);
-}
-.inscription .date { transform: rotate(-0.6deg); }
-body.far .doc > .inscription { opacity: 0; }
-
-.doc-body { font-size: 18.5px; line-height: 1.78; color: var(--ink); letter-spacing: .005em; }
-.doc-body h1 { font-family: var(--font-head); font-weight: 800; font-size: 40px; line-height: 1.22; letter-spacing: .01em; color: var(--ink); margin: 8px 0 22px; }
-.doc-body h2 { font-family: var(--font-head); font-weight: 700; font-size: 23px; margin: 42px 0 12px; color: var(--ink); display: flex; align-items: center; gap: 12px; }
-.doc-body h2::before { content: ""; width: 12px; height: 12px; flex: none; background: var(--shu); transform: translateY(1px); box-shadow: 3px 2px 0 rgba(233,185,178,.9); }
-.doc-body h3 { font-family: var(--font-head); font-weight: 700; font-size: 19px; }
-.doc-body strong { font-weight: 700; color: var(--ink); background: linear-gradient(transparent 58%, rgba(233,185,178,.55) 58%, rgba(233,185,178,.55) 92%, transparent 92%); }
-/* bottom line: a flat pink block with halftone dots */
-.doc-body blockquote {
-  border: 0; border-radius: 2px; padding: 20px 24px 20px 26px;
-  background-color: #f1d9d2;
-  background-image: radial-gradient(circle, rgba(207,79,54,.16) 0.9px, transparent 1.4px), var(--grain);
-  background-size: 6px 6px, auto; background-blend-mode: normal, multiply;
-  box-shadow: 5px 4px 0 rgba(169,193,207,.7);
-  font-family: var(--font-head); font-weight: 600; font-size: 21px; line-height: 1.6; color: #2b2320;
-}
-.doc-body blockquote ol, .doc-body blockquote ul { font-family: var(--font-body); font-weight: 400; }
-.doc-body ul > li::before { width: 7px; height: 7px; border-radius: 0; background: var(--ink); opacity: .75; top: .72em; left: 9px; transform: rotate(8deg); }
-.doc-body ol > li::before { content: counter(n); background: none; width: auto; height: auto; color: var(--shu); font-family: var(--font-head); font-weight: 800; font-size: 17px; line-height: 1.6; top: 0.05em; left: 4px; border-radius: 0; }
-.doc-body code, .doc-body pre { background: var(--paper-2); border-radius: 2px; }
-.doc-body hr { background: var(--ink); height: 2px; width: 40px; margin: 34px 0; opacity: .8; }
-.doc-body ::selection { background: rgba(169,193,207,.55); }
-::highlight(note) { background-color: rgba(233,185,178,.65); }
-::highlight(note-active) { background-color: rgba(207,79,54,.4); }
-
-.thinking .label { font-family: var(--font-head); font-style: normal; font-weight: 600; color: var(--shu); letter-spacing: .1em; }
-.thinking .bar { border-radius: 1px; background: radial-gradient(circle, rgba(38,34,30,.22) 1px, transparent 1.5px) 0 0/6px 6px, #ece5d6; animation: halftone 2.6s ease-in-out infinite; }
-@keyframes halftone { 50% { opacity: .45; } }
-.caret { border-radius: 0; width: 10px; height: 10px; background: var(--shu); animation: glow 1.4s steps(2) infinite; }
-.materialize { animation-name: inkin; }
-@keyframes inkin { 0% { opacity: 0; filter: blur(3px); transform: translate(3px, 2px); } 60% { opacity: 1; } 100% { opacity: 1; filter: none; transform: none; } }
-.doc.sweep .doc-scroll::after { background: linear-gradient(180deg, transparent, rgba(233,185,178,.25), transparent); }
-.gutter { border-radius: 2px; background-color: var(--paper); border-color: var(--line-strong); color: var(--shu); }
-.gutter:hover { background: var(--shu); color: var(--paper); }
-
-/* ---- chrome ---- */
-#hud-top .pill, .status, .hud-btn, #constellation .track, .edge-nav { box-shadow: 0 1px 1px rgba(40,32,20,.1), 0 8px 18px -10px rgba(40,32,20,.4); }
-#hud-top .pill { border-radius: 3px; }
-.hud-btn, .edge-nav { border-radius: 3px; }
-.status { border-radius: 3px; font-family: var(--font-body); }
-#constellation .track { border-radius: 3px; }
-.hud-btn svg, .edge-nav svg { stroke: var(--ink); stroke-width: 1.6; }
-.hud-btn.active { background: var(--ink); background-image: none; } .hud-btn.active svg { stroke: var(--paper); }
-.brand { font-family: var(--font-head); font-weight: 800; font-size: 19px; color: var(--ink); letter-spacing: .04em; }
-.brand-ring { width: 16px; height: 16px; background: var(--shu); box-shadow: 2px 2px 0 var(--sakura); }
-.crumb-project { color: var(--shu-deep); font-weight: 700; }
-#constellation button span { border-radius: 0; background: #b8ad9b; }
-#constellation button.on span { background: var(--shu); box-shadow: 2px 2px 0 var(--sakura); }
-#constellation button.has-notes span { background: var(--sakura); }
-.status .dot { border-radius: 0; background: var(--ochre); }
-.status.live .dot { background: var(--shu); box-shadow: 2px 2px 0 var(--sakura); }
-
-#notes-panel { border-radius: 3px; }
-.panel-head .label { font-family: var(--font-head); font-weight: 800; font-size: 19px; color: var(--ink); }
-.panel-head .count { border-radius: 0; background: var(--shu); color: var(--paper); }
-.note-card { border-radius: 2px; border-left: 0; box-shadow: 4px 3px 0 var(--sakura), 0 1px 2px rgba(40,32,20,.1); }
-.note-card .q { font-family: var(--font-head); font-style: normal; font-weight: 500; }
-.note-card .n { font-weight: 700; }
-.note-card .doc-tag { color: var(--shu); }
-kbd { border-radius: 2px; background: var(--paper-2); color: var(--ink); border-color: var(--line-strong); }
-
-#popover { border-radius: 3px; box-shadow: 4px 4px 0 var(--sora), 0 14px 30px -12px rgba(40,32,20,.45); }
-#popover button { border-radius: 2px; }
-#popover button:hover { background: var(--paper-2); }
-#popover button.primary, #btn-send { background: var(--shu); color: #fff8ee; }
-#popover button.primary:hover, #btn-send:hover { background: var(--shu-deep); }
-
-.composer-row { border-radius: 3px; box-shadow: 6px 5px 0 rgba(169,193,207,.75), 0 18px 36px -16px rgba(40,32,20,.5); }
-.composer-row:focus-within { box-shadow: 6px 5px 0 rgba(233,185,178,.9), 0 18px 36px -16px rgba(40,32,20,.5); }
-#input { font-family: var(--font-body); }
-#btn-send { border-radius: 2px; font-family: var(--font-head); font-weight: 800; letter-spacing: .12em; }
-#btn-mic { border-radius: 2px; }
-.composer-meta { font-family: var(--font-body); color: var(--ink-2); text-shadow: none; }
-body.night .composer-meta, body.far .composer-meta, body.sky .composer-meta { color: rgba(255,250,238,.85); }
-#attach-chip { border-radius: 2px; background: var(--sakura); color: #4a201a; box-shadow: 3px 3px 0 var(--sora); }
-#attach-clear { border-radius: 2px; }
-/* the orb becomes a red seal that stamps while Claude works */
-#orb .core { inset: 11px; border-radius: 2px; background: var(--shu); box-shadow: 2px 2px 0 var(--sakura); animation: none; }
-#orb .r1, #orb .r2 { inset: 11px; border-radius: 2px; border-color: rgba(207,79,54,.6); }
-body.busy #orb .core { animation: stamp 1.6s ease-in-out infinite; }
-@keyframes stamp { 0%, 100% { transform: scale(1) rotate(0); } 40% { transform: scale(.82) rotate(-4deg); } 55% { transform: scale(1.06) rotate(1deg); } }
-
-#drawer { border-radius: 0; }
-.drawer-new { border-radius: 2px; border-color: var(--shu); color: var(--shu-deep); }
-.thread-item { border-radius: 2px; } .thread-item.on { background: var(--paper-2); box-shadow: inset 3px 0 0 var(--shu); }
-#toast { border-radius: 3px; }
-
-/* =================================================================
-   CONTRAST PASS: pronounced, letterpress-style text and deeper shadows
-   ================================================================= */
-:root {
-  --ink: #1a1714;
-  --ink-2: #3f3832;
-  --muted: #7d7366;
-  /* layered shadows: a tight contact shadow, then a long soft one */
-  --shadow: 0 1px 1px rgba(30,22,14,.14), 0 4px 8px -2px rgba(30,22,14,.18), 0 22px 44px -18px rgba(30,22,14,.5);
-  --shadow-deep: 0 1px 1px rgba(30,22,14,.16), 0 6px 12px -4px rgba(30,22,14,.22), 0 40px 80px -24px rgba(30,22,14,.62);
-}
-
-/* Text pressed into paper: darker ink, a touch more weight, a faint highlight below each letter */
-.doc-body { color: var(--ink); font-weight: 500; font-size: 19px; line-height: 1.76; text-shadow: 0 1px 0 rgba(255,255,255,.55); -webkit-font-smoothing: subpixel-antialiased; }
-.doc-body h1 { font-size: 43px; color: #120f0d; text-shadow: 0 0 .4px rgba(18,15,13,.6), 0 1px 0 rgba(255,255,255,.6); }
-.doc-body h2 { font-size: 24px; color: #120f0d; text-shadow: 0 0 .3px rgba(18,15,13,.5), 0 1px 0 rgba(255,255,255,.6); }
-.doc-body strong { font-weight: 700; color: #0f0d0b; }
-.doc-body em { color: var(--ink-2); }
-.doc-body blockquote { font-weight: 700; color: #1d1512; background-color: #efd2c9; box-shadow: 5px 4px 0 rgba(140,172,192,.85), 0 1px 2px rgba(30,22,14,.12); }
-.doc-body ul > li::before { opacity: 1; background: var(--shu); }
-.doc-head { color: var(--muted); }
-.doc-head .prompt { color: var(--ink-2); font-weight: 500; }
-.inscription { color: #6e6458; font-size: 20px; }
-#input { color: var(--ink); font-weight: 500; }
-.note-card .n { color: var(--ink); }
-.notes-empty { color: var(--ink-2); font-weight: 500; }
-
-/* Depth: the focused sheet lifts off the landscape; others sink back */
-.doc { box-shadow: var(--shadow); }
-.doc:not(.focused) { opacity: .5; filter: saturate(.7) brightness(.92); }
-.doc.focused { box-shadow: 18px 15px 0 var(--block), 18px 15px 24px -6px rgba(30,22,14,.35), var(--shadow-deep); }
-/* the top edge of the sheet catches the light, the bottom curls into shadow */
-.doc::after {
-  content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: 3px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.85), inset 0 -10px 18px -12px rgba(60,45,30,.18);
-}
-body.far .doc::after { display: none; }
-body.far .doc:not(.focused), body.overview .doc { filter: none; }
-
-/* Chrome: deeper, crisper shadows */
-#notes-panel, #drawer, #popover { box-shadow: var(--shadow-deep); }
-.composer-row { box-shadow: 7px 6px 0 rgba(140,172,192,.9), 0 1px 1px rgba(30,22,14,.15), 0 26px 48px -18px rgba(30,22,14,.6); }
-.composer-row:focus-within { box-shadow: 7px 6px 0 rgba(226,160,150,.95), 0 1px 1px rgba(30,22,14,.15), 0 26px 48px -18px rgba(30,22,14,.6); }
-#hud-top .pill, .status, .hud-btn, #constellation .track, .edge-nav { box-shadow: 0 1px 1px rgba(30,22,14,.16), 0 10px 22px -10px rgba(30,22,14,.55); }
-.note-card { box-shadow: 4px 3px 0 #e2a59b, 0 1px 2px rgba(30,22,14,.16), 0 8px 16px -10px rgba(30,22,14,.35); }
-.composer-meta { color: #2e2924; font-weight: 500; }
-
-/* =================================================================
-   QUIET EDITION (doc view)
-   One sheet on a lot of bare paper. Three colours only: paper, graphite,
-   one red. One light source: --sx / --sy / --sa are set from the time of
-   day in app.js, so every shadow falls the same way. Chrome has no boxes.
-   Overrides the rules above.
-   ================================================================= */
-:root { --sx: 0.5; --sy: 0.6; --sa: 1; --shade: 30 22 14; }
-
-/* ---- the sheet and its shadow ---- */
-.doc {
-  border-radius: 2px;
-  /* lying flat: only a tight contact shadow */
-  box-shadow: 0 0 0 .5px rgb(var(--shade) / .10), 0 1px 1px rgb(var(--shade) / .14),
-    calc(var(--sx) * 3px) calc(var(--sy) * 4px) 7px -2px rgb(var(--shade) / calc(var(--sa) * .16));
-  transition: opacity .9s var(--ease), box-shadow 1.2s var(--ease), background-color .6s var(--ease);
-}
-body:not(.far) .doc:not(.focused) { opacity: 1; filter: none; }
-body:not(.far) .doc:not(.focused) > .doc-head,
-body:not(.far) .doc:not(.focused) > .doc-scroll,
-body:not(.far) .doc:not(.focused) > .inscription { opacity: .32; }
-/* the sheet you are reading lifts: contact, near, mid and a long soft far shadow */
-body:not(.far) .doc.focused {
-  box-shadow: 0 0 0 .5px rgb(var(--shade) / .14), 0 1px 1px rgb(var(--shade) / .24),
-    calc(var(--sx) * 6px) calc(var(--sy) * 8px) 10px -2px rgb(var(--shade) / calc(var(--sa) * .26)),
-    calc(var(--sx) * 26px) calc(var(--sy) * 32px) 38px -8px rgb(var(--shade) / calc(var(--sa) * .26)),
-    calc(var(--sx) * 80px) calc(var(--sy) * 100px) 120px -20px rgb(var(--shade) / calc(var(--sa) * .34));
-}
-/* in flight the sheet is held higher: the shadow travels further and softens, then settles */
-body:not(.far) #world.flying .doc.focused {
-  box-shadow: 0 0 0 .5px rgb(var(--shade) / .10), 0 1px 1px rgb(var(--shade) / .10),
-    calc(var(--sx) * 14px) calc(var(--sy) * 18px) 24px -4px rgb(var(--shade) / calc(var(--sa) * .18)),
-    calc(var(--sx) * 54px) calc(var(--sy) * 68px) 80px -10px rgb(var(--shade) / calc(var(--sa) * .20)),
-    calc(var(--sx) * 150px) calc(var(--sy) * 190px) 200px -24px rgb(var(--shade) / calc(var(--sa) * .26));
-}
-/* the pencil line that joins one doc to the next */
-#links path.trail { stroke: var(--ink); stroke-opacity: .3; stroke-width: 1.2; stroke-dasharray: 2 10; animation: none; }
-
-/* ---- inside the sheet: graphite only ---- */
-.doc-body h2::before { display: none; }
-.doc-body strong { background: none; }
-.doc-body blockquote {
-  background: none; box-shadow: none; border-radius: 0; border-left: 2px solid var(--shu);
-  padding: 2px 0 2px 24px; margin: 4px 0 34px; font-weight: 600; font-size: 22px; line-height: 1.55; color: var(--ink);
-}
-.doc-body ul > li::before { background: var(--ink); }
-.doc-body ol > li::before { color: var(--ink); }
-.doc-body a { color: var(--ink); text-decoration-color: rgb(26 23 20 / .4); }
-.doc-body ::selection { background: rgb(26 23 20 / .16); }
-.doc-head .prompt b { color: var(--ink); }
-.gutter { color: var(--ink); }
-.gutter:hover { background: var(--ink); color: var(--paper); }
-.doc.sweep .doc-scroll::after { display: none; }
-/* your marks are the red: a fine underline where you left a note */
-::highlight(note) { background-color: rgba(207, 79, 54, .06); text-decoration: underline; text-decoration-color: rgba(207, 79, 54, .8); text-decoration-thickness: 1px; text-underline-offset: 5px; }
-::highlight(note-active) { background-color: rgba(207, 79, 54, .22); text-decoration: underline; text-decoration-color: #cf4f36; text-decoration-thickness: 1px; text-underline-offset: 5px; }
-
-/* ---- pencil notes in the margin beside the sheet ---- */
-.marginalia { display: none; position: absolute; left: calc(100% + 22px); top: 0; width: 240px; height: 100%; pointer-events: none; transition: opacity .7s var(--ease); }
-body.wide .marginalia { display: block; }
-body.far .marginalia, .doc:not(.focused) .marginalia { opacity: 0; visibility: hidden; }
-.pencil-note {
-  position: absolute; left: 0; right: 0; padding-left: 30px; pointer-events: auto;
-  font-family: var(--font-pencil); font-size: 24px; line-height: 1.12; color: #453e36;
-  transform: rotate(-1.4deg); transform-origin: 0 50%;
-  transition: top .4s var(--ease), opacity .4s var(--ease); animation: pencil-in .6s var(--ease) both;
-}
-.pencil-note:nth-child(even) { transform: rotate(.8deg); }
-.pencil-note::before { content: ""; position: absolute; left: 0; top: .56em; width: 20px; height: 1.5px; background: var(--shu); }
-.pencil-note.off { opacity: .3; }
-.pencil-note .n { outline: none; cursor: text; white-space: pre-wrap; overflow-wrap: anywhere; }
-.pencil-note .n:focus { color: var(--ink); }
-.pencil-note .del { position: absolute; left: 100%; top: 0; border: 0; background: none; padding: 0 8px; font: 500 18px/1.3 var(--font-body); color: var(--muted); opacity: 0; transition: opacity .2s; }
-.pencil-note:hover .del, .pencil-note .del:focus-visible { opacity: 1; }
-.pencil-note .del:hover { color: var(--shu); }
-@keyframes pencil-in { from { opacity: 0; clip-path: inset(0 100% 0 0); } to { opacity: 1; clip-path: inset(0 -40px 0 0); } }
-body.wide #notes-panel { display: none; }
-
-/* ---- chrome: no boxes, and it leaves when you are still ---- */
-#hud-top .pill, .status, .hud-btn, #constellation .track, .edge-nav, #btn-mic, #attach-clear { background: none; box-shadow: none; }
-.hud-btn:hover, .edge-nav:hover, #hud-top .pill .hud-btn:hover { background: rgb(26 23 20 / .07); transform: none; }
-.hud-btn.active { background: var(--ink); }
-.brand-ring { box-shadow: none; border-radius: 50%; }
-.crumb-project { color: var(--ink); }
-#constellation button.on span, .status.live .dot { box-shadow: none; }
-#constellation button.has-notes span { background: none; box-shadow: inset 0 0 0 1.5px var(--shu); }
-#constellation button.on.has-notes span { background: var(--shu); }
-.status .dot { background: none; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
-.status.live .dot { background: var(--shu); }
-.edge-nav { opacity: .5; } .edge-nav:hover { opacity: 1; }
-.edge-nav.right { right: 18px; }
-#hud-top, .edge-nav, .composer-meta { transition: opacity .9s var(--ease); }
-body.idle #hud-top:not(:focus-within), body.idle .edge-nav:not(:focus-visible), body.idle .composer-meta { opacity: 0; }
-body.idle.sky #hud-top, body.idle.far #hud-top { opacity: 1; }
-
-/* ---- the composer: one ruled line at the foot of the sheet ---- */
-#composer, body.wide #composer { left: var(--cx, 50%); width: min(var(--doc-w, 820px), calc(100vw - 32px)); }
-.composer-row, .composer-row:focus-within { background: none; box-shadow: none; }
-.composer-row { border-radius: 0; padding: 2px 0; align-items: center; border-bottom: 1px solid rgb(26 23 20 / .32); transition: border-color .5s var(--ease); }
-.composer-row:focus-within { border-bottom-color: var(--ink); }
-#input { font-size: 18px; }
-#input::placeholder { color: rgb(26 23 20 / .45); }
-#orb .core { box-shadow: none; }
-#btn-send { background: none; color: var(--ink); height: 40px; padding: 0 2px 0 12px; border-radius: 0; font-family: var(--font-body); font-weight: 700; font-size: 12px; letter-spacing: .22em; text-transform: uppercase; transition: opacity .4s var(--ease), color .2s; }
-#btn-send:hover { background: none; color: var(--shu); transform: none; }
-#input:placeholder-shown ~ #btn-send { opacity: .28; }
-body.has-notes #input ~ #btn-send { opacity: 1; color: var(--shu); }
-body.night #attach-chip { color: var(--ink); }
-#btn-send[disabled] { opacity: .2; }
-.composer-meta { color: var(--ink-2); opacity: .75; }
-body.night .composer-meta, body.night.far .composer-meta, body.night.sky .composer-meta { color: var(--ink); }
-/* "3 notes ready to send": pencilled above the line, not a chip */
-#attach-chip { background: none; box-shadow: none; padding: 0; font-family: var(--font-pencil); font-size: 22px; font-weight: 500; color: #453e36; }
-#attach-chip .attach-count { color: var(--shu); font-weight: 500; }
-#attach-clear { font-family: var(--font-pencil); font-size: 19px; color: var(--muted); padding: 0 6px; text-decoration: underline; text-underline-offset: 3px; }
-body.wide #attach-chip { cursor: default; }
-
-/* ---- small sheets: soft shadow from the same light, no colour blocks ---- */
-#popover { box-shadow: 0 0 0 .5px rgb(var(--shade) / .14), 0 1px 1px rgb(var(--shade) / .18), calc(var(--sx) * 10px) calc(var(--sy) * 14px) 26px -8px rgb(var(--shade) / .4); }
-#popover button.primary { background: var(--ink); color: var(--paper); }
-#popover button.primary:hover { background: #000; }
-.note-card { box-shadow: 0 1px 2px rgb(var(--shade) / .16), 0 8px 16px -10px rgb(var(--shade) / .35); }
-
-@media (max-width: 760px) {
-  .doc-head { padding: 14px 24px 8px; }
-  .doc-scroll { padding: 12px 24px 48px; }
-  .doc-body blockquote { font-size: 19px; padding-left: 18px; }
-}
-
-/* =================================================================
-   SKY
-   Zoomed out, a pale blue sky is printed over the paper in halftone
-   (drawn on #ground in app.js). Clouds are the paper left unprinted, so
-   every label here sits on bare paper. Four colours: paper, graphite,
-   one red, one sky blue.
-   ================================================================= */
-
-/* ---- docs become clouds: the sheet dissolves, its title stays ---- */
-.doc > .doc-head, .doc > .doc-scroll { transition: opacity .6s var(--ease); }
-.doc { transition: opacity .9s var(--ease), box-shadow 1.2s var(--ease), background-color .7s var(--ease); }
-body.far .doc { background-color: transparent; background-image: none; box-shadow: none !important; opacity: 1; cursor: zoom-in; }
-body.far .doc > .doc-head, body.far .doc > .doc-scroll { opacity: 0 !important; pointer-events: none; }
-.doc .pad {
-  position: absolute; left: 50%; top: 50%; width: calc(var(--doc-w) * 0.86);
-  display: grid; justify-items: center; gap: calc(6px * var(--inv, 1));
-  transform: translate(-50%, -50%) rotate(calc(-1 * var(--rot, 0deg))) scale(.92);
-  opacity: 0; pointer-events: none; text-align: center;
-  transition: opacity .8s var(--ease), transform 1.1s var(--ease);
-}
-body.far .doc .pad { opacity: 1; transform: translate(-50%, -50%) rotate(calc(-1 * var(--rot, 0deg))); }
-.pad-title {
-  font-family: var(--font-head); font-weight: 700; color: var(--ink); line-height: 1.22; letter-spacing: .01em;
-  font-size: min(calc(17px * var(--inv, 1)), calc(var(--doc-w) * 0.075));
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; text-wrap: balance;
-}
-.pad-meta { font-family: var(--font-pencil); color: #5d554b; font-size: min(calc(17px * var(--inv, 1)), calc(var(--doc-w) * 0.06)); }
-.pad-meta:empty { display: none; }
-body.far .doc:hover .pad-title { text-decoration: underline; text-decoration-thickness: calc(1px * var(--inv, 1)); text-underline-offset: .25em; text-decoration-color: var(--shu); }
-body.far .doc.focused .pad-title::before {
+.map-cloud .meta, .sky-cloud .meta { font-family: var(--font-pencil); color: #5d554b; white-space: nowrap; }
+.map-cloud .meta { font-size: min(calc(18px * var(--inv, 1)), 42px); }
+.map-cloud.here .name::before, .sky-cloud.here .name::before {
   content: ""; display: inline-block; width: .32em; height: .32em; border-radius: 50%; background: var(--shu); margin-right: .4em; vertical-align: .14em;
 }
-#links path.trail { transition: stroke-opacity 1s var(--ease); }
-body.far #links path.trail { stroke-opacity: .22; stroke-width: calc(1.2px * var(--inv, 1)); stroke-dasharray: calc(2px * var(--inv, 1)) calc(12px * var(--inv, 1)); }
-
-/* ---- the sky of projects ---- */
-#sky { position: absolute; left: 0; top: 0; pointer-events: none; }
-.sky-cloud {
-  position: absolute; border: 0; padding: 0; background: none; border-radius: 50%;
-  display: grid; place-content: center; justify-items: center; gap: calc(4px * var(--inv, 1)); text-align: center;
-  cursor: pointer; pointer-events: none; outline: none;
+.map-cloud.new .name { font-weight: 500; font-style: italic; color: var(--ink-2); }
+.map-cloud:hover .name, .map-cloud:focus-visible .name, .sky-cloud:hover .name, .sky-cloud:focus-visible .name {
+  text-decoration: underline; text-decoration-color: var(--shu); text-decoration-thickness: calc(1.5px * var(--inv, 1)); text-underline-offset: .22em;
 }
-body.high .sky-cloud:not(.ghost) { pointer-events: auto; }
 .sky-cloud .name {
   font-family: var(--font-head); font-weight: 700; color: var(--ink); white-space: nowrap; letter-spacing: .03em;
-  font-size: calc(25px * var(--inv, 1)); line-height: 1.1; display: flex; align-items: center; gap: .38em;
+  font-size: calc(25px * var(--inv, 1)); line-height: 1.1; display: flex; align-items: center;
 }
-.sky-cloud .meta { font-family: var(--font-pencil); color: #5d554b; font-size: calc(20px * var(--inv, 1)); white-space: nowrap; }
-.sky-cloud.here .name::before { content: ""; width: .3em; height: .3em; border-radius: 50%; background: var(--shu); flex: none; }
-.sky-cloud:hover .name, .sky-cloud:focus-visible .name { text-decoration: underline; text-decoration-color: var(--shu); text-decoration-thickness: calc(1.5px * var(--inv, 1)); text-underline-offset: .22em; }
+.sky-cloud .meta { font-size: calc(20px * var(--inv, 1)); }
 .sky-cloud.ghost { cursor: default; }
 .sky-cloud.ghost .name { font-weight: 500; color: var(--ink-2); font-style: italic; }
 .sky-word {
   position: absolute; white-space: nowrap; font-family: var(--font-pencil); color: var(--ink);
   font-size: calc(30px * var(--inv, 1)); transform: rotate(-2deg); transform-origin: 0 50%; opacity: .78;
 }
-body.night .sky-word { color: #f4efe4; opacity: .85; }
+.map-word { font-size: calc(26px * var(--inv, 1)); }
+body.night .sky-word { color: var(--white); opacity: .88; }
+/* labels keep a breath of lit paper around them over the cloud's shading */
+.sky-cloud .name, .sky-cloud .meta, .map-cloud .name, .map-cloud .meta {
+  text-shadow: 0 0 calc(8px * var(--inv, 1)) rgb(244 239 228 / .85), 0 0 calc(2px * var(--inv, 1)) rgb(244 239 228 / .9);
+}
 
-/* ---- what the chrome does up in the sky ---- */
-body.sky #composer, body.sky #notes-panel, body.sky .edge-nav, body.sky #constellation, body.sky #btn-new, body.sky #btn-overview { opacity: 0; pointer-events: none; }
-#composer, #notes-panel, .edge-nav, #constellation, #btn-new, #btn-overview, .crumbs { transition: opacity .7s var(--ease); }
-body.idle.sky #hud-top { opacity: 1; }
-body.night.sky #hud-top .brand, body.night.sky .status { color: #f4efe4; }
-body.night.sky .hud-btn svg { stroke: #f4efe4; }
-body.far:not(.sky) .composer-meta { opacity: 0; }
+/* ---------- the chat ---------- */
+#chat {
+  position: fixed; inset: 0; z-index: 3; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+  padding: calc(var(--top-h) + 40px) 16px 0;
+  scrollbar-width: thin; scrollbar-color: rgb(255 253 247 / .35) transparent;
+  /* the sky closes softly over the chat under the header and the composer */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 calc(var(--top-h) + 14px), #000 calc(100% - var(--composer-h) - 50px), transparent calc(100% - var(--composer-h) + 16px));
+  mask-image: linear-gradient(to bottom, transparent 0, #000 calc(var(--top-h) + 14px), #000 calc(100% - var(--composer-h) - 50px), transparent calc(100% - var(--composer-h) + 16px));
+  transform-origin: 50% 40%;
+}
+#chat::-webkit-scrollbar { width: 8px; }
+#chat::-webkit-scrollbar-thumb { background: rgb(255 253 247 / .3); border-radius: 4px; }
+#feed { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 64px; }
+#spacer { height: calc(var(--composer-h) + 40px); }
 
-/* ---- at night, chrome over the deep blue is printed in paper white ---- */
-body.night.far .brand, body.night.far .crumb-project, body.night.far .thread-title, body.night.far .status,
-body.night.far #input, body.night.far #btn-send, body.night.far .composer-meta, body.night.far #attach-chip { color: #f1ece2; }
-body.night.far .crumb-project:not(:empty)::after { color: rgb(241 236 226 / .6); }
-body.night.far .hud-btn svg, body.night.far .edge-nav svg { stroke: #f1ece2; }
-body.night.far .hud-btn.active { background: #f1ece2; } body.night.far .hud-btn.active svg { stroke: var(--ink); }
-body.night.far #input::placeholder { color: rgb(241 236 226 / .55); }
-body.night.far .composer-row { border-bottom-color: rgb(241 236 226 / .45); }
-body.night.far .status .dot { box-shadow: inset 0 0 0 1.5px #f1ece2; }
-body.night.far #constellation button span { background: rgb(241 236 226 / .55); }
-body.night.far #constellation button.on span { background: var(--shu); }
+/* ---- your words: white letters floating in the sky, like credits ---- */
+.you {
+  color: var(--white); text-align: center; padding: 0 5%;
+  font-family: var(--font-head); font-weight: 700; letter-spacing: .01em; text-shadow: var(--sky-letter);
+}
+.you-meta { font-family: var(--font-body); font-size: 11px; font-weight: 700; letter-spacing: .3em; text-transform: uppercase; opacity: .72; margin-bottom: 14px; }
+.you-text { white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: balance; line-height: 1.2; }
+.you.s1 .you-text { font-size: 50px; }
+.you.s2 .you-text { font-size: 38px; }
+.you.s3 .you-text { font-size: 29px; line-height: 1.3; }
+.you.s4 { text-align: left; }
+.you.s4 .you-text { font-size: 21px; line-height: 1.55; font-weight: 600; text-wrap: pretty; }
+.you-notes { list-style: none; margin: 18px auto 0; padding: 0; display: grid; gap: 6px; max-width: 620px; font-family: var(--font-pencil); font-size: 23px; font-weight: 500; line-height: 1.2; text-align: left; }
+.you-notes li::before { content: ""; display: inline-block; width: 16px; height: 1.5px; background: var(--shu); vertical-align: .3em; margin-right: 10px; }
+.you-notes q { opacity: .78; }
+.you.arrive { animation: credit 1.4s var(--ease) both; }
+@keyframes credit { from { opacity: 0; transform: translateY(46px); filter: blur(5px); } 60% { filter: none; } to { opacity: 1; transform: none; } }
+
+/* ---- Claude's replies: clouds ---- */
+.reply { position: relative; --pf: 1; margin-top: 46px; }
+.you + .reply { margin-top: 30px; }
+.reply .shape { position: relative; filter: drop-shadow(calc(var(--sx) * 12px) calc(var(--sy) * 16px) 20px rgb(var(--sky-shade) / .32)); }
+.reply .puff {
+  position: absolute; border-radius: 50%; transform: translateX(-50%);
+  width: calc(var(--d) * var(--pf) * 1px); height: calc(var(--d) * var(--pf) * 1px);
+  background: var(--cloud) var(--washi);
+}
+.reply .puff.top { top: calc(var(--d) * var(--pf) * -0.42px); }
+.reply .puff.low { bottom: calc(var(--d) * var(--pf) * -0.3px); background: radial-gradient(circle at 50% 30%, transparent 52%, rgb(var(--sky-shade) / .07)), var(--cloud) var(--washi); }
+.reply .puff.side { top: 50%; transform: translate(-50%, -50%); }
+.reply .body {
+  position: relative; z-index: 1; border-radius: 46px; padding: 30px 56px 42px;
+  background: var(--cloud) var(--washi);
+  /* the underside turns away from the light */
+  box-shadow: inset 0 -26px 34px -24px rgb(var(--sky-shade) / .16), inset 0 1px 0 rgb(255 255 255 / .9);
+}
+.reply-head { font-size: 11px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+.reply.arrive .shape { animation: billow 1.2s var(--ease) both; }
+@keyframes billow { from { opacity: 0; transform: translateY(24px) scale(.97); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+
+/* ---------- reading inside a cloud ---------- */
+.doc-body { font-size: 18.5px; line-height: 1.74; color: var(--ink); font-weight: 500; letter-spacing: .005em; position: relative; }
+.doc-body > * { position: relative; }
+.doc-body > :first-child { margin-top: 0; }
+.doc-body > :last-child { margin-bottom: 0; }
+.doc-body h1 { font-family: var(--font-head); font-weight: 800; font-size: 36px; line-height: 1.22; letter-spacing: .01em; margin: 6px 0 18px; color: #120f0d; }
+.doc-body h2 { font-family: var(--font-head); font-weight: 700; font-size: 23px; margin: 36px 0 10px; color: #120f0d; }
+.doc-body h3 { font-family: var(--font-head); font-weight: 700; font-size: 19px; margin: 26px 0 6px; }
+.doc-body p { margin: 0 0 15px; }
+.doc-body strong { font-weight: 700; color: #0f0d0b; }
+.doc-body em { color: var(--ink-2); }
+.doc-body a { color: var(--ink); text-underline-offset: 3px; text-decoration-color: rgb(26 23 20 / .4); }
+.doc-body ul, .doc-body ol { padding-left: 0; margin: 0 0 16px; list-style: none; }
+.doc-body li { position: relative; padding-left: 28px; margin: 6px 0; }
+.doc-body ul > li::before { content: ""; position: absolute; left: 9px; top: .72em; width: 7px; height: 7px; background: var(--ink); transform: rotate(8deg); }
+.doc-body ol { counter-reset: n; }
+.doc-body ol > li { counter-increment: n; }
+.doc-body ol > li::before { content: counter(n); position: absolute; left: 4px; top: .05em; color: var(--ink); font-family: var(--font-head); font-weight: 800; font-size: 17px; line-height: 1.6; }
+.doc-body li > ul, .doc-body li > ol { margin: 4px 0 0; }
+/* the bottom line */
+.doc-body blockquote { margin: 4px 0 28px; padding: 2px 0 2px 22px; border-left: 2px solid var(--shu); font-family: var(--font-head); font-weight: 600; font-size: 21px; line-height: 1.55; color: var(--ink); }
+.doc-body blockquote p:last-child { margin-bottom: 0; }
+.doc-body blockquote ol, .doc-body blockquote ul { font-family: var(--font-body); font-weight: 400; font-size: 17px; }
+.doc-body code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .84em; padding: 2px 6px; border-radius: 3px; background: var(--paper-2); color: #4d4636; }
+.doc-body pre { background: var(--paper-2); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 14px; line-height: 1.55; }
+.doc-body pre code { background: none; padding: 0; }
+.doc-body hr { border: 0; background: var(--ink); height: 2px; width: 40px; margin: 30px 0; opacity: .8; }
+.doc-body table { border-collapse: collapse; width: 100%; margin: 0 0 18px; font-size: 16px; }
+.doc-body th, .doc-body td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; }
+.doc-body th { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+.doc-body ::selection { background: rgb(26 23 20 / .16); }
+
+.materialize { animation: inkin 1s var(--ease) both; }
+@keyframes inkin { 0% { opacity: 0; filter: blur(3px); transform: translate(3px, 2px); } 60% { opacity: 1; } 100% { opacity: 1; filter: none; transform: none; } }
+.caret { display: inline-block; width: 10px; height: 10px; margin-left: 6px; vertical-align: .05em; background: var(--shu); animation: blink 1.4s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .3; } }
+
+/* thinking: a small cloud gathering */
+.thinking { display: grid; gap: 12px; }
+.thinking .label { font-family: var(--font-head); font-weight: 600; color: var(--shu); letter-spacing: .1em; font-size: 16px; }
+.thinking .bar { height: 12px; border-radius: 6px; background: radial-gradient(circle, rgb(26 23 20 / .2) 1px, transparent 1.5px) 0 0/6px 6px, #eee9df; animation: halftone 2.6s ease-in-out infinite; }
+.thinking .bar:nth-of-type(2) { width: 88%; animation-delay: .2s; }
+.thinking .bar:nth-of-type(3) { width: 64%; animation-delay: .4s; }
+@keyframes halftone { 50% { opacity: .45; } }
+.thinking .activity { display: grid; gap: 4px; margin-top: 4px; font-size: 14.5px; color: var(--ink-2); }
+.thinking .activity div { animation: inkin .6s var(--ease) both; }
+.thinking .activity div::before { content: "· "; color: var(--shu); font-weight: 800; }
+
+/* paragraph "+" */
+.gutter {
+  position: absolute; left: -40px; top: 4px; width: 26px; height: 26px; border-radius: 2px;
+  border: 1px solid var(--line-strong); background: var(--cloud); color: var(--ink);
+  display: grid; place-items: center; font-size: 17px; line-height: 1; opacity: 0; transition: opacity .2s, background .2s;
+  user-select: none; -webkit-user-select: none;
+}
+.gutter::before { content: "+"; }
+.doc-body > *:hover > .gutter, .gutter:focus-visible { opacity: 1; }
+.gutter:hover { background: var(--ink); color: var(--cloud); }
+
+/* your marks are the red: a fine underline where you left a note */
+::highlight(note) { background-color: rgba(207, 79, 54, .06); text-decoration: underline; text-decoration-color: rgba(207, 79, 54, .8); text-decoration-thickness: 1px; text-underline-offset: 5px; }
+::highlight(note-active) { background-color: rgba(207, 79, 54, .22); text-decoration: underline; text-decoration-color: #cf4f36; text-decoration-thickness: 1px; text-underline-offset: 5px; }
+
+/* ---- pencil notes in the sky beside the cloud ---- */
+.marginalia { display: none; position: absolute; left: calc(100% + 30px); top: 0; width: 220px; height: 100%; pointer-events: none; }
+body.wide .marginalia { display: block; }
+.pencil-note {
+  position: absolute; left: 0; right: 0; padding-left: 30px; pointer-events: auto;
+  font-family: var(--font-pencil); font-size: 24px; line-height: 1.12; color: var(--white); text-shadow: var(--sky-letter);
+  transform: rotate(-1.4deg); transform-origin: 0 50%;
+  transition: top .4s var(--ease); animation: pencil-in .6s var(--ease) both;
+}
+.pencil-note:nth-child(even) { transform: rotate(.8deg); }
+.pencil-note::before { content: ""; position: absolute; left: 0; top: .56em; width: 20px; height: 1.5px; background: var(--shu); }
+.pencil-note .n { outline: none; cursor: text; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pencil-note .del { position: absolute; left: 100%; top: 0; border: 0; background: none; padding: 0 8px; font: 500 18px/1.3 var(--font-body); color: var(--white); opacity: 0; transition: opacity .2s; }
+.pencil-note:hover .del, .pencil-note .del:focus-visible { opacity: .8; }
+.pencil-note .del:hover { color: var(--shu); opacity: 1; }
+@keyframes pencil-in { from { opacity: 0; clip-path: inset(0 100% 0 0); } to { opacity: 1; clip-path: inset(0 -40px 0 0); } }
+
+/* ---- an empty chat: an invitation written in the sky ---- */
+.empty { text-align: center; color: var(--white); text-shadow: var(--sky-letter); padding-top: 12vh; }
+.empty .where { font-size: 11px; font-weight: 700; letter-spacing: .3em; text-transform: uppercase; opacity: .72; }
+.empty h1 { font-family: var(--font-head); font-weight: 700; font-size: 54px; line-height: 1.15; margin: 16px 0 22px; text-wrap: balance; }
+.empty p { font-family: var(--font-pencil); font-size: 24px; margin: 6px 0; opacity: .9; }
+.empty kbd { color: var(--ink); text-shadow: none; }
+
+/* ---------- chrome ---------- */
+#hud-top {
+  position: fixed; top: 0; left: 0; right: 0; height: var(--top-h); z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px;
+  transition: opacity .9s var(--ease);
+}
+#hud-top .pill { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 6px 0; }
+.brand { border: 0; background: none; padding: 0; font-family: var(--font-head); font-weight: 800; font-size: 19px; color: var(--ink); letter-spacing: .04em; display: flex; align-items: center; gap: 9px; }
+.brand-ring { width: 16px; height: 16px; border-radius: 50%; background: var(--shu); }
+.crumbs { display: flex; align-items: center; min-width: 0; gap: 8px; padding-left: 12px; border-left: 1px solid var(--line-strong); }
+.crumb-project { border: 0; background: none; padding: 0; font-size: 13px; font-weight: 700; color: var(--ink); white-space: nowrap; }
+.crumb-project:hover { text-decoration: underline; text-decoration-color: var(--shu); text-underline-offset: 3px; }
+.crumb-project:not(:empty)::after { content: "›"; margin-left: 8px; color: var(--muted); font-weight: 400; }
+.thread-title { font-size: 14px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; }
+.thread-title:empty { display: none; }
+body:not(.view-chat) .crumb-project::after { display: none; }
+.hud-right { display: flex; align-items: center; gap: 6px; }
+.hud-btn { width: 40px; height: 40px; border-radius: 3px; border: 0; background: none; display: grid; place-items: center; flex: none; transition: background .2s; }
+.hud-btn svg { width: 19px; height: 19px; stroke: var(--ink); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.hud-btn:hover { background: rgb(26 23 20 / .07); }
+.status { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 700; color: var(--ink-2); padding: 0 6px 0 10px; height: 40px; }
+.status .dot { width: 8px; height: 8px; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.status.live .dot { background: var(--shu); box-shadow: none; }
+.status .clock { color: var(--muted); padding-left: 8px; border-left: 1px solid var(--line-strong); }
+
+/* over the blue (in a chat, or at night) the chrome is printed in paper white */
+body.onblue .brand, body.onblue .crumb-project, body.onblue .thread-title, body.onblue .status, body.onblue .status .clock { color: var(--white); text-shadow: var(--sky-letter); }
+body.onblue .crumb-project:not(:empty)::after { color: rgb(255 253 247 / .6); }
+body.onblue .crumbs, body.onblue .status .clock { border-color: rgb(255 253 247 / .35); }
+body.onblue .hud-btn svg { stroke: var(--white); }
+body.onblue .hud-btn:hover { background: rgb(255 253 247 / .14); }
+body.onblue .status .dot { box-shadow: inset 0 0 0 1.5px var(--white); }
+body.onblue .status.live .dot { box-shadow: none; }
+body.idle.view-chat #hud-top:not(:focus-within) { opacity: 0; }
+body.view-sky #btn-new { opacity: 0; pointer-events: none; }
+
+/* ---------- composer: what you type floats in the sky ---------- */
+#composer { position: fixed; z-index: 25; left: 50%; bottom: 4px; transform: translateX(-50%); width: min(800px, calc(100vw - 32px)); transition: opacity .6s var(--ease); }
+body:not(.view-chat) #composer { opacity: 0; pointer-events: none; }
+.composer-row { display: flex; align-items: flex-end; gap: 10px; padding: 2px 0 4px; border-bottom: 1px solid rgb(255 253 247 / .4); transition: border-color .5s var(--ease); }
+.composer-row:focus-within { border-bottom-color: var(--white); }
+#input {
+  flex: 1; resize: none; background: none; border: 0; outline: none; color: var(--white); caret-color: var(--shu);
+  font: 700 40px/1.22 var(--font-head); letter-spacing: .01em; text-shadow: var(--sky-letter);
+  padding: 8px 2px; max-height: 40vh; min-height: 64px;
+}
+#input.m { font-size: 31px; line-height: 1.3; }
+#input.l { font-size: 24px; line-height: 1.45; font-weight: 600; }
+#input::placeholder { color: rgb(255 253 247 / .5); font-weight: 600; text-shadow: none; }
+#btn-send { flex: none; height: 46px; border: 0; background: none; color: var(--white); padding: 0 2px 0 12px; font: 700 12px var(--font-body); letter-spacing: .22em; text-transform: uppercase; transition: opacity .4s var(--ease), color .2s; text-shadow: var(--sky-letter); }
+#btn-send:hover { color: var(--shu); }
+#input:placeholder-shown ~ #btn-send { opacity: .35; }
+body.has-notes #input ~ #btn-send { opacity: 1; color: #ffd9cf; }
+#btn-send[disabled] { opacity: .25; }
+#btn-mic { width: 46px; height: 46px; }
+#btn-mic.listening { background: rgb(207 79 54 / .35); }
+.composer-meta { text-align: center; font-size: 11.5px; font-weight: 500; color: rgb(255 253 247 / .65); margin-top: 4px; letter-spacing: .02em; transition: opacity .9s var(--ease); }
+body.idle .composer-meta { opacity: 0; }
+#attach { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); display: flex; justify-content: center; align-items: baseline; gap: 8px; }
+#attach[hidden] { display: none; }
+#attach-chip { border: 0; background: none; padding: 0; font: 500 23px var(--font-pencil); color: var(--white); text-shadow: var(--sky-letter); }
+#attach-chip .attach-count { color: #ffb3a3; }
+#attach-clear { border: 0; background: none; font: 400 19px var(--font-pencil); color: rgb(255 253 247 / .7); text-decoration: underline; text-underline-offset: 3px; }
+/* the red seal; it stamps while Claude works */
+#orb { position: relative; width: 44px; height: 46px; flex: none; }
+#orb span { position: absolute; border-radius: 2px; }
+#orb .core { inset: 13px 11px; background: var(--shu); }
+#orb .r1, #orb .r2 { inset: 13px 11px; border: 1.5px solid rgba(207, 79, 54, .7); opacity: 0; }
+body.busy #orb .core { animation: stamp 1.6s ease-in-out infinite; }
+body.busy #orb .r1 { animation: ripple 2.4s ease-out infinite; }
+body.busy #orb .r2 { animation: ripple 2.4s ease-out 1.2s infinite; }
+body.listening #orb .core { background: #f0a493; }
+@keyframes stamp { 0%, 100% { transform: scale(1) rotate(0); } 40% { transform: scale(.82) rotate(-4deg); } 55% { transform: scale(1.06) rotate(1deg); } }
+@keyframes ripple { 0% { transform: scale(1); opacity: .8; } 100% { transform: scale(2.1); opacity: 0; } }
+
+/* ---------- paper surfaces: notes panel, popover, drawer, toast ---------- */
+#notes-panel, #popover, #drawer, #toast, .note-card, #pop-input { background-color: var(--paper); background-image: var(--washi); }
+
+#notes-panel {
+  position: fixed; z-index: 18; left: 12px; right: 12px; bottom: calc(var(--composer-h) - 20px); max-height: 52vh;
+  border-radius: 3px; box-shadow: var(--lift); display: flex; flex-direction: column; overflow: hidden;
+  transform: translateY(calc(100% + 240px)); transition: transform .5s var(--ease);
+}
+#notes-panel.open { transform: none; }
+body.wide #notes-panel { display: none; }
+.panel-head { display: flex; align-items: center; gap: 10px; padding: 16px 18px 12px; flex: none; }
+.panel-head .label { font-family: var(--font-head); font-weight: 800; font-size: 19px; color: var(--ink); }
+.panel-head .count { font-size: 12px; font-weight: 800; background: var(--shu); color: var(--paper); padding: 1px 9px; }
+.panel-close { margin-left: auto; width: 32px; height: 32px; border-radius: 2px; border: 0; background: var(--paper-2); font-size: 18px; line-height: 1; color: var(--ink-2); display: grid; place-items: center; }
+#notes-list { flex: 1; overflow-y: auto; padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+.note-card { border-radius: 2px; padding: 12px 14px; box-shadow: 0 1px 2px rgb(var(--shade) / .16), 0 8px 16px -10px rgb(var(--shade) / .35); position: relative; }
+.note-card .q { font-family: var(--font-head); font-weight: 500; font-size: 14px; color: var(--ink-2); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+.note-card .n { margin-top: 6px; font-size: 15.5px; color: var(--ink); line-height: 1.45; white-space: pre-wrap; outline: none; font-weight: 700; }
+.note-card .meta { display: flex; justify-content: flex-end; margin-top: 6px; }
+.note-card .del { background: none; border: 0; color: var(--muted); font-size: 12px; padding: 2px 4px; }
+.note-card .del:hover { color: var(--shu); }
+
+#popover { position: fixed; z-index: 40; border-radius: 3px; padding: 6px; box-shadow: var(--lift); animation: pop .3s var(--ease); max-width: calc(100vw - 32px); }
+@keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.97); } }
+.pop-quick { display: flex; gap: 2px; flex-wrap: wrap; }
+#popover button { border: 0; background: none; border-radius: 2px; padding: 8px 12px; font-size: 14.5px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+#popover button:hover { background: var(--paper-2); }
+#popover button.primary { background: var(--ink); color: var(--paper); }
+#popover button.primary:hover { background: #000; }
+.pop-write { width: min(360px, calc(100vw - 48px)); padding: 4px; }
+#pop-input { width: 100%; resize: none; border: 1px solid var(--line-strong); border-radius: 2px; color: var(--ink); font: 15.5px/1.45 var(--font-body); padding: 9px 11px; outline: none; }
+#pop-input:focus { border-color: var(--ink); }
+.pop-row { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.pop-row .hint { font-size: 12px; color: var(--muted); }
+
+/* ---- the drawer: every chat, by project ---- */
+#drawer { position: fixed; z-index: 50; left: 0; top: 0; bottom: 0; width: min(360px, 88vw); transform: translateX(-102%); transition: transform .55s var(--ease); display: flex; flex-direction: column; }
+#drawer.open { transform: none; box-shadow: 30px 0 80px rgb(var(--sky-shade) / .35); }
+#drawer-scrim { position: fixed; inset: 0; z-index: 45; background: rgb(var(--sky-shade) / .25); }
+#drawer-list { flex: 1; overflow-y: auto; padding: 0 10px 16px; }
+.d-group { font-size: 11px; font-weight: 700; letter-spacing: .24em; text-transform: uppercase; color: var(--muted); padding: 18px 12px 6px; }
+.d-proj { display: flex; align-items: center; gap: 6px; padding: 10px 6px 4px 12px; }
+.d-proj .name { flex: 1; min-width: 0; border: 0; background: none; padding: 0; text-align: left; font-family: var(--font-head); font-weight: 800; font-size: 16px; color: var(--ink); }
+.d-proj .name:hover { text-decoration: underline; text-decoration-color: var(--shu); text-underline-offset: 3px; }
+.d-proj .add { border: 0; background: none; width: 30px; height: 30px; border-radius: 2px; font-size: 19px; line-height: 1; color: var(--ink-2); }
+.d-proj .add:hover { background: var(--paper-2); color: var(--shu); }
+.d-item { display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left; border: 0; background: none; border-radius: 2px; padding: 9px 12px; color: var(--ink); }
+.d-item:hover { background: var(--paper-2); }
+.d-item.on { background: var(--paper-2); box-shadow: inset 3px 0 0 var(--shu); }
+.d-item .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 15px; font-weight: 500; }
+.d-item .m { font-family: var(--font-pencil); font-size: 17px; color: var(--muted); white-space: nowrap; }
+.d-empty { padding: 4px 12px 8px; font-family: var(--font-pencil); font-size: 18px; color: var(--muted); }
+.drawer-sky { margin: 8px 14px 16px; padding: 10px; border: 0; background: none; color: var(--ink-2); font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
+
+#toast { position: fixed; z-index: 60; left: 50%; top: 76px; transform: translate(-50%, -16px); opacity: 0; pointer-events: none; padding: 11px 18px; border-radius: 3px; font-size: 14.5px; transition: all .5s var(--ease); max-width: calc(100vw - 32px); box-shadow: var(--lift); }
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+#toast.err { color: var(--shu-deep); }
+
+/* ---------- small screens ---------- */
 @media (max-width: 760px) {
+  :root { --top-h: 56px; }
+  #hud-top { padding: 0 8px; }
+  .crumbs, .status .clock, .status .status-text { display: none; }
+  #feed { gap: 44px; }
+  .you { padding: 0; }
+  .you.s1 .you-text { font-size: 36px; }
+  .you.s2 .you-text { font-size: 29px; }
+  .you.s3 .you-text { font-size: 23px; }
+  .you.s4 .you-text { font-size: 18px; }
+  .you-notes { font-size: 20px; }
+  .reply { --pf: .58; margin-top: 24px; }
+  .reply .puff.side { display: none; }
+  .reply .body { border-radius: 30px; padding: 22px 22px 30px; }
+  .doc-body { font-size: 17px; }
+  .doc-body h1 { font-size: 28px; }
+  .doc-body h2 { font-size: 20px; }
+  .doc-body blockquote { font-size: 18.5px; padding-left: 16px; }
+  .gutter { display: none; }
+  .empty h1 { font-size: 36px; }
+  #input { font-size: 28px; min-height: 52px; }
+  #input.m { font-size: 23px; } #input.l { font-size: 19px; }
+  .composer-meta { display: none; }
+  #composer { bottom: max(6px, env(safe-area-inset-bottom)); }
   .sky-cloud .name { font-size: calc(20px * var(--inv, 1)); }
   .sky-cloud .meta { font-size: calc(17px * var(--inv, 1)); }
   .sky-word { font-size: calc(24px * var(--inv, 1)); }
 }
-/* labels keep a breath of lit paper around them over the cloud's shading */
-.sky-cloud .name, .sky-cloud .meta, body.far .pad-title, body.far .pad-meta { text-shadow: 0 0 calc(8px * var(--inv, 1)) rgb(244 239 228 / .85), 0 0 calc(2px * var(--inv, 1)) rgb(244 239 228 / .9); }
-body.night .sky-cloud .name, body.night .sky-cloud .meta, body.night.far .pad-title, body.night.far .pad-meta { text-shadow: 0 0 calc(8px * var(--inv, 1)) rgb(200 200 198 / .7); }
-body.night .sky-cloud .meta, body.night.far .pad-meta { color: #2a2520; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+
+/* at night the clouds print a shade darker: labels darken with them */
+body.night .sky-cloud .name, body.night .sky-cloud .meta, body.night .map-cloud .name, body.night .map-cloud .meta { text-shadow: 0 0 calc(8px * var(--inv, 1)) rgb(200 200 198 / .7); }
+body.night .sky-cloud .meta, body.night .map-cloud .meta { color: #2a2520; }
+.map-cloud.new .name { white-space: nowrap; }

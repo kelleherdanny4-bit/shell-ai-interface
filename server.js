@@ -103,6 +103,8 @@ async function listThreads() {
   for (const f of files) {
     try {
       const t = JSON.parse(await fsp.readFile(path.join(DATA_DIR, f), "utf8"));
+      // A chat exists once something has been said in it; empty drafts stay hidden.
+      if (!t.turns?.length) continue;
       out.push({ id: t.id, title: t.title, updated: t.updated, projectId: t.projectId || "shell", docs: t.turns.filter((x) => x.role === "assistant").length });
     } catch {}
   }
@@ -130,9 +132,13 @@ function composeMessage({ text = "", notes = [] }) {
   return parts.join("\n").trim();
 }
 
-function titleOf(markdown) {
+function titleOf(markdown, fallback = "") {
   const m = markdown.match(/^#\s+(.+)$/m);
-  return m ? m[1].replace(/[*_`]/g, "").trim() : "Untitled";
+  if (m) return m[1].replace(/[*_`]/g, "").trim();
+  // Short chat replies have no title: name the chat after what Danny asked.
+  const words = String(fallback).replace(/\s+/g, " ").trim().split(" ");
+  const t = words.slice(0, 7).join(" ").replace(/[.,;:!?]+$/, "");
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) + (words.length > 7 ? "…" : "") : "Untitled";
 }
 
 // ---------- streaming ----------
@@ -312,7 +318,8 @@ async function handleSend(req, res, id) {
     } else out = await streamDemo(send, content, "No Claude Code sign-in or API key found.");
 
     if (out.session) thread.ccSession = out.session;
-    const assistant = { id: newId(), role: "assistant", text: out.text, title: titleOf(out.text), at: Date.now() };
+    const firstAsk = thread.turns.find((t) => t.role === "user")?.display?.text || body.text || "";
+    const assistant = { id: newId(), role: "assistant", text: out.text, title: titleOf(out.text, firstAsk), at: Date.now() };
     thread.turns.push(assistant);
     if (!thread.title || thread.title === "New thread") thread.title = assistant.title;
     await writeThread(thread);
