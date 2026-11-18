@@ -5,6 +5,6 @@
     { "id": "life", "name": "Life", "group": "personal", "repo": "steering-add" },
     { "id": "career", "name": "Career search", "group": "personal", "repo": "ai-career" },
     { "id": "website", "name": "Website", "group": "personal", "repo": "the-clear-voice", "also": ["ai-career"] },
-    { "id": "shell", "name": "Shell", "group": "personal", "repo": "shell-ai-interface" }
+    { "id": "shell", "name": "This workspace", "group": "personal", "repo": "shell-ai-interface" }
   ]
 }
