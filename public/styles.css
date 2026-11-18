@@ -270,8 +270,7 @@ body.view-sky #btn-new { opacity: 0; pointer-events: none; }
 /* ---------- composer: what you type floats in the sky ---------- */
 #composer { position: fixed; z-index: 25; left: 50%; bottom: 4px; transform: translateX(-50%); width: min(800px, calc(100vw - 32px)); transition: opacity .6s var(--ease); }
 body:not(.view-chat) #composer { opacity: 0; pointer-events: none; }
-.composer-row { display: flex; align-items: flex-end; gap: 10px; padding: 2px 0 4px; border-bottom: 1px solid rgb(255 253 247 / .4); transition: border-color .5s var(--ease); }
-.composer-row:focus-within { border-bottom-color: var(--white); }
+.composer-row { display: flex; align-items: flex-end; gap: 10px; padding: 2px 0 4px; }
 #input {
   flex: 1; resize: none; background: none; border: 0; outline: none; color: var(--white); caret-color: var(--shu);
   font: 700 40px/1.22 var(--font-head); letter-spacing: .01em; text-shadow: var(--sky-letter);
@@ -295,7 +294,7 @@ body.idle .composer-meta { opacity: 0; }
 #attach-chip .attach-count { color: #ffb3a3; }
 #attach-clear { border: 0; background: none; font: 400 19px var(--font-pencil); color: rgb(255 253 247 / .7); text-decoration: underline; text-underline-offset: 3px; }
 /* the red seal; it stamps while Claude works */
-#orb { position: relative; width: 44px; height: 46px; flex: none; }
+#orb { display: none; }
 #orb span { position: absolute; border-radius: 2px; }
 #orb .core { inset: 13px 11px; background: var(--shu); }
 #orb .r1, #orb .r2 { inset: 13px 11px; border: 1.5px solid rgba(207, 79, 54, .7); opacity: 0; }
@@ -401,4 +400,4 @@ body.wide #notes-panel { display: none; }
 /* at night the clouds print a shade darker: labels darken with them */
 body.night .sky-cloud .name, body.night .sky-cloud .meta, body.night .map-cloud .name, body.night .map-cloud .meta { text-shadow: 0 0 calc(8px * var(--inv, 1)) rgb(200 200 198 / .7); }
 body.night .sky-cloud .meta, body.night .map-cloud .meta { color: #2a2520; }
-.map-cloud.new .name { white-space: nowrap; }
+.map-cloud.new .name { white-space: nowrap; max-width: none; overflow: visible; display: block; }
