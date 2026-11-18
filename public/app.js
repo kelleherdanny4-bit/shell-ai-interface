@@ -322,6 +322,13 @@ function renderThread() {
   const t = state.thread;
   // Sessions from the Claude app are shown, not continued (yet).
   document.body.classList.toggle("readonly", !!t.readOnly);
+  if (t.readOnly) {
+    const ro = $("#ro-note");
+    if (t.source === "claude.ai") {
+      ro.innerHTML = `From claude.ai. Read-only here: <a target="_blank" rel="noopener">open it on claude.ai</a> to keep going.`;
+      $("a", ro).href = t.url;
+    } else ro.textContent = "From the Claude app. Read-only here: open it in the Claude app to keep going.";
+  }
   if (!t.turns.length) renderEmpty();
   for (const turn of t.turns) {
     if (turn.role === "user") makeYou(turn.display || { text: turn.text }, turn.at);
@@ -758,7 +765,7 @@ function renderDrawer() {
         const b = document.createElement("button");
         b.className = "d-item" + (t.id === state.thread?.id ? " on" : "");
         b.innerHTML = `<span class="t"></span><span class="m">${esc(when(t.updated))}</span>`;
-        if (t.source === "claude") b.title = "From the Claude app (read-only here)";
+        if (t.source) b.title = `From ${t.source === "claude.ai" ? "claude.ai" : "the Claude app"} (read-only here)`;
         $(".t", b).textContent = t.title;
         b.addEventListener("click", () => { closeDrawer(); goToChat(t.id); });
         list.appendChild(b);
@@ -1060,7 +1067,7 @@ function renderMapLabels() {
     el.style.cssText = `left:${cl.x - cl.w / 2}px;top:${cl.y - cl.h / 2}px;width:${cl.w}px;height:${cl.h}px`;
     el.innerHTML = `<span class="name"></span><span class="meta"></span>`;
     $(".name", el).textContent = cl.isNew ? "+ New chat" : cl.item.title || "Untitled";
-    $(".meta", el).textContent = cl.isNew ? "start fresh" : when(cl.item.updated) + (cl.item.source === "claude" ? " · Claude app" : "");
+    $(".meta", el).textContent = cl.isNew ? "start fresh" : when(cl.item.updated) + (cl.item.source === "claude" ? " · Claude app" : cl.item.source === "claude.ai" ? " · claude.ai" : "");
     el.setAttribute("aria-label", cl.isNew ? "New chat" : `${cl.item.title}, ${when(cl.item.updated)}`);
     el.addEventListener("click", () => openFromMap(cl.id));
     hoverable(el, cl.key);
@@ -1768,6 +1775,39 @@ function quietChrome() {
   wake();
 }
 
+// ---------------------------------------------------------------- claude.ai sync
+// Shell imports a claude.ai export the moment it lands in Downloads. If the last
+// one is over a week old, a pencil line in the sky says so, with the way to a new one.
+
+const EXPORT_URL = "https://claude.ai/settings/data-privacy-controls";
+let lastImport = null;
+
+function renderSyncNudge(info) {
+  const el = $("#sync-nudge");
+  const age = info?.importedAt ? Date.now() - info.importedAt : Infinity;
+  const stale = age > 7 * 864e5;
+  el.hidden = !stale;
+  if (!stale) return;
+  el.innerHTML = info?.importedAt
+    ? `claude.ai chats last brought in ${esc(when(info.importedAt).toLowerCase())}. <a target="_blank" rel="noopener">Export a fresh copy</a>, then download it from the email.`
+    : `Bring your claude.ai chats into the sky: <a target="_blank" rel="noopener">export them</a>, then download the zip from the email. Shell picks it up from Downloads.`;
+  $("a", el).href = EXPORT_URL;
+}
+
+async function checkSync() {
+  try {
+    const s = await api("/api/status");
+    const info = s.claudeAi;
+    if (lastImport !== null && info.importedAt > lastImport) {
+      toast(`Brought in ${info.chats} claude.ai chats`);
+      await loadProjects().catch(() => {});
+      if (state.view !== "chat") buildMap();
+    }
+    lastImport = info.importedAt;
+    renderSyncNudge(info);
+  } catch {}
+}
+
 async function boot() {
   if (innerWidth <= 760) input.placeholder = "Say something";
   measure();
@@ -1786,6 +1826,8 @@ async function boot() {
     $(".status-text", st).textContent = { plan: "Your plan", api: "API", demo: "Demo" }[s.engine] || "Demo";
     st.title = s.engine === "plan" ? `Running on your Claude plan via Claude Code. Tools: ${s.tools.join(", ")}` : s.engine === "api" ? `Claude API · ${s.model}` : "Demo mode: replies are canned. See README.";
   } catch {}
+  checkSync();
+  setInterval(checkSync, 60_000);
   await loadProjects().catch(() => {});
   const list = await api("/api/threads").catch(() => []);
   let last = null;

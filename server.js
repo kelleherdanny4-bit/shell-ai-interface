@@ -13,7 +13,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 
@@ -54,7 +54,7 @@ function loadProjects() {
     const repoDir = p.repo ? dir(p.repo) : null;
     const dirs = [...new Set(extra.map(dir))].filter((d) => d !== repoDir && fs.existsSync(d));
     // `folders`: other folder names whose Claude app sessions belong to this project.
-    return { id: p.id, name: p.name, group, repo: p.repo || null, folders: p.folders || [], cwd: repoDir && fs.existsSync(repoDir) ? repoDir : null, dirs, missing: !!repoDir && !fs.existsSync(repoDir) };
+    return { id: p.id, name: p.name, group, repo: p.repo || null, folders: p.folders || [], claudeProjects: p.claudeProjects || [], cwd: repoDir && fs.existsSync(repoDir) ? repoDir : null, dirs, missing: !!repoDir && !fs.existsSync(repoDir) };
   });
   return projects;
 }
@@ -215,6 +215,94 @@ async function shellSessionIds() {
     try { const t = JSON.parse(await fsp.readFile(path.join(DATA_DIR, f), "utf8")); if (t.ccSession) ids.add(t.ccSession); } catch {}
   }
   return ids;
+}
+
+// ---------- claude.ai chats (from the data export) ----------
+// claude.ai has no API for chat history; the data export is the way in.
+// Settings → Privacy → Export data emails a link to a zip (data-….zip). When
+// that zip lands in Downloads, Shell imports it on its own. Only files named
+// like an export and holding conversations.json are ever opened.
+
+const AI_DIR = path.join(here, "data", "claude-ai");
+const AI_STORE = path.join(AI_DIR, "store.json");
+const EXPORT_DIRS = (process.env.SHELL_EXPORT_DIRS || path.join(os.homedir(), "Downloads")).split(path.delimiter);
+fs.mkdirSync(AI_DIR, { recursive: true });
+
+let aiStore = { importedAt: 0, file: "", mtime: 0, conversations: [], projects: [] };
+try { aiStore = JSON.parse(fs.readFileSync(AI_STORE, "utf8")); } catch {}
+
+const unzipList = (file) => execFileSync("unzip", ["-Z1", file], { encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").filter(Boolean);
+const unzipRead = (file, entry) => execFileSync("unzip", ["-p", file, entry], { encoding: "utf8", maxBuffer: 1024 * 1024 * 1024 });
+
+function msgText(m) {
+  if (Array.isArray(m.content) && m.content.length) {
+    const t = m.content.filter((b) => b?.type === "text" && b.text).map((b) => b.text).join("\n\n").trim();
+    if (t) return t;
+  }
+  return String(m.text || "").trim();
+}
+
+function importExport(file, mtime) {
+  const entries = unzipList(file);
+  const convEntry = entries.find((e) => e.endsWith("conversations.json"));
+  if (!convEntry) return false; // not a Claude export: leave it alone
+  const raw = JSON.parse(unzipRead(file, convEntry));
+  const projEntry = entries.find((e) => e.endsWith("projects.json"));
+  let projects = [];
+  try { projects = projEntry ? JSON.parse(unzipRead(file, projEntry)) : []; } catch {}
+  const conversations = raw.map((c) => {
+    const turns = (c.chat_messages || []).map((m) => {
+      const text = msgText(m);
+      const at = Date.parse(m.created_at || c.created_at) || 0;
+      return text ? (m.sender === "human"
+        ? { id: m.uuid, role: "user", text, display: { text }, at }
+        : { id: m.uuid, role: "assistant", text, title: "", at }) : null;
+    }).filter(Boolean);
+    return {
+      uuid: c.uuid, title: (c.name || "").trim() || clipWords(turns.find((t) => t.role === "user")?.text) || "Untitled chat",
+      updated: Date.parse(c.updated_at || c.created_at) || 0, project: c.project_uuid || c.project?.uuid || null, turns,
+    };
+  }).filter((c) => c.turns.length);
+  aiStore = {
+    importedAt: Date.now(), file: path.basename(file), mtime, conversations,
+    projects: projects.map((p) => ({ uuid: p.uuid, name: p.name })).filter((p) => p.uuid && p.name),
+  };
+  fs.writeFileSync(AI_STORE, JSON.stringify(aiStore));
+  console.log(`  ✓ imported ${conversations.length} claude.ai chats from ${path.basename(file)}`);
+  return true;
+}
+
+// Look for a newer export now and then; cheap, since only data-*.zip names are considered.
+function scanForExports() {
+  for (const dir of EXPORT_DIRS) {
+    let names = [];
+    try { names = fs.readdirSync(dir); } catch { continue; }
+    const fresh = names.filter((n) => /^data-.*\.zip$/i.test(n))
+      .map((n) => { const f = path.join(dir, n); try { return { f, m: fs.statSync(f).mtimeMs }; } catch { return null; } })
+      .filter((x) => x && x.m > (aiStore.mtime || 0))
+      .sort((a, b) => b.m - a.m);
+    for (const { f, m } of fresh) {
+      try { if (importExport(f, m)) return; } catch (err) { console.log(`  ! couldn't import ${path.basename(f)}: ${err.message}`); }
+    }
+  }
+}
+scanForExports();
+setInterval(scanForExports, 60_000);
+for (const dir of EXPORT_DIRS) {
+  try { fs.watch(dir, (ev, name) => { if (name && /^data-.*\.zip$/i.test(name)) setTimeout(scanForExports, 3000); }); } catch {}
+}
+
+// Which cloud a claude.ai chat belongs to: a Shell project that claims its
+// claude.ai project by name (`claudeProjects`), else that claude.ai project's
+// own cloud, else one "claude.ai" cloud.
+function aiHome(c, projects) {
+  const proj = aiStore.projects.find((p) => p.uuid === c.project);
+  if (proj) {
+    const mine = projects.find((p) => (p.claudeProjects || []).some((n) => n.toLowerCase() === proj.name.toLowerCase()));
+    if (mine) return { id: mine.id };
+    return { id: "ai-proj-" + proj.uuid.slice(0, 8), name: proj.name };
+  }
+  return { id: "ai-chats", name: "claude.ai" };
 }
 
 // Turn Danny's notes + typed text into one plain, readable message.
@@ -479,7 +567,8 @@ const server = http.createServer(async (req, res) => {
   try {
     if (p === "/api/status") {
       const ctx = loadContext();
-      return json(res, 200, { engine: ENGINE, model: ENGINE === "api" ? MODEL : "your Claude plan", live: ENGINE !== "demo", tools: ENGINE === "plan" ? PLAN_TOOLS : [], contextFiles: ctx.files });
+      return json(res, 200, { engine: ENGINE, model: ENGINE === "api" ? MODEL : "your Claude plan", live: ENGINE !== "demo", tools: ENGINE === "plan" ? PLAN_TOOLS : [], contextFiles: ctx.files,
+        claudeAi: { importedAt: aiStore.importedAt || 0, chats: aiStore.conversations.length } });
     }
     if (p === "/api/projects") {
       const threads = await listThreads();
@@ -496,9 +585,21 @@ const server = http.createServer(async (req, res) => {
         if (!proj) extra.set(home.id, (proj = { id: home.id, name: home.name, group: "personal", fromClaude: true, threads: [] }));
         proj.threads.push({ id: s.id, title: s.title, updated: s.updated, projectId: proj.id, docs: s.turns.filter((t) => t.role === "assistant").length, source: "claude" });
       }
+      for (const c of aiStore.conversations) {
+        const home = aiHome(c, configured);
+        let proj = projects.find((x) => x.id === home.id) || extra.get(home.id);
+        if (!proj) extra.set(home.id, (proj = { id: home.id, name: home.name, group: "personal", fromClaude: true, threads: [] }));
+        proj.threads.push({ id: "ai-" + c.uuid, title: c.title, updated: c.updated, projectId: proj.id, docs: c.turns.filter((t) => t.role === "assistant").length, source: "claude.ai" });
+      }
       const all = [...projects, ...[...extra.values()].sort((a, b) => (a.id === "cc-nofolder") - (b.id === "cc-nofolder") || a.name.localeCompare(b.name))];
       for (const pr of all) pr.threads.sort((a, b) => b.updated - a.updated);
       return json(res, 200, all);
+    }
+    const ai = p.match(/^\/api\/threads\/ai-([\w-]+)$/);
+    if (ai && req.method === "GET") {
+      const c = aiStore.conversations.find((x) => x.uuid === ai[1]);
+      if (!c) return json(res, 404, { error: "not found" });
+      return json(res, 200, { id: "ai-" + c.uuid, title: c.title, projectId: aiHome(c, loadProjects()).id, turns: c.turns, readOnly: true, source: "claude.ai", url: `https://claude.ai/chat/${c.uuid}`, updated: c.updated });
     }
     let cc = p.match(/^\/api\/threads\/cc-([\w-]+)$/);
     if (cc && req.method === "GET") {

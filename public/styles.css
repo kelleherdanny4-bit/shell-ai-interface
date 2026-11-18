@@ -406,3 +406,10 @@ body.night .sky-cloud .meta, body.night .map-cloud .meta { color: #2a2520; }
 #ro-note { display: none; text-align: center; font-family: var(--font-pencil); font-size: 23px; color: var(--white); text-shadow: var(--sky-letter); padding: 10px 0 14px; }
 body.readonly #ro-note { display: block; }
 body.readonly .composer-row, body.readonly #attach, body.readonly .composer-meta { display: none; }
+
+/* the weekly nudge to bring in claude.ai chats: pencilled in the sky, up among the clouds only */
+#sync-nudge { position: fixed; z-index: 15; left: 50%; top: calc(var(--top-h) + 2px); transform: translateX(-50%); width: min(720px, calc(100vw - 32px)); text-align: center; font-family: var(--font-pencil); font-size: 22px; line-height: 1.3; color: var(--white); text-shadow: var(--sky-letter); transition: opacity .6s var(--ease); }
+#sync-nudge[hidden] { display: none; }
+#sync-nudge a, #ro-note a { color: inherit; text-decoration-color: var(--shu); text-underline-offset: 4px; }
+body.view-chat #sync-nudge { opacity: 0; pointer-events: none; }
+body:not(.night):not(.view-chat) #sync-nudge { color: var(--ink); text-shadow: 0 0 8px rgb(244 239 228 / .9); }

@@ -78,7 +78,17 @@ Unsent notes are saved in the browser, so a reload never loses them.
 (from the Claude app or the terminal) appear as clouds: under a project when they
 ran in its repo (or a folder it claims), otherwise under their own folder, and
 loose ones under "No folder". They're read-only in Shell for now. Sessions stored
-in the cloud and claude.ai chats aren't on this computer, so they can't appear.
+in the cloud aren't on this computer, so they can't appear.
+
+**claude.ai chats, through the export.** claude.ai has no API for chat history,
+so Shell uses the data export: claude.ai → Settings → Privacy → **Export data**,
+then download the zip from the email. Shell watches `~/Downloads` and imports any
+new `data-….zip` on its own (it opens nothing else). Chats in a claude.ai
+project get that project's cloud, or join a Shell project that claims it with
+`"claudeProjects": ["Name"]`; the rest go under **claude.ai**. Each opens
+read-only with a link back to claude.ai. When the last import is over a week
+old, a pencil line up in the sky reminds you. Set `SHELL_EXPORT_DIRS` to watch
+other folders.
 
 ## Settings
 

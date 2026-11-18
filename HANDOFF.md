@@ -56,6 +56,12 @@ by where it is, not by searching.
   (`--resume <id> --fork-session`) with the project's knowledge. Cloud sessions
   and claude.ai chats aren't on disk; a claude.ai data export import is the
   way to bring those in.
+- **claude.ai sync (2026-11-18):** `scanForExports` in `server.js` watches
+  `~/Downloads` for `data-*.zip`, checks it holds `conversations.json`, and
+  stores the chats in `data/claude-ai/store.json` (gitignored). Clouds by
+  claude.ai project (or a Shell project's `claudeProjects`), else "claude.ai".
+  The sky shows a nudge when the import is over 7 days old. Tested with a fake
+  export; **not yet with a real one**: check the format when Danny's arrives.
 - Checked in the browser at 1440×900 and 375×812: chat, notes, zoom levels,
   and a real message end to end.
 
