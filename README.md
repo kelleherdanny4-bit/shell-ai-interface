@@ -37,6 +37,15 @@ repos, including each repo's `CLAUDE.md` / `AGENTS.md`, so every chat already
 knows your rules and plans. It's **read-only** for now: it can read and search
 files and the web, not edit them.
 
+**Keep it running in the background** (starts at login, restarts if it stops):
+
+```bash
+scripts/install-login-item.sh
+```
+
+Log: `~/Library/Logs/shell.log`. Undo with `scripts/install-login-item.sh --remove`.
+After pulling new code, run the script again to restart Shell.
+
 Other ways to run: `ANTHROPIC_API_KEY=sk-ant-... SHELL_ENGINE=api npm start`
 (API key, billed separately), or `npm run demo` (canned replies).
 

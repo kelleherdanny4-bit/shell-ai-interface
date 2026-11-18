@@ -276,7 +276,11 @@ function importExport(file, mtime) {
 function scanForExports() {
   for (const dir of EXPORT_DIRS) {
     let names = [];
-    try { names = fs.readdirSync(dir); } catch { continue; }
+    try { names = fs.readdirSync(dir); } catch (err) {
+      // macOS guards Downloads; say so once instead of failing quietly
+      if (!scanForExports.warned?.[dir]) { (scanForExports.warned ||= {})[dir] = 1; console.log(`  ! can't read ${dir} (${err.code}): allow Node in System Settings → Privacy & Security → Files and Folders`); }
+      continue;
+    }
     const fresh = names.filter((n) => /^data-.*\.zip$/i.test(n))
       .map((n) => { const f = path.join(dir, n); try { return { f, m: fs.statSync(f).mtimeMs }; } catch { return null; } })
       .filter((x) => x && x.m > (aiStore.mtime || 0))

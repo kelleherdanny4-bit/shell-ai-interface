@@ -62,6 +62,10 @@ by where it is, not by searching.
   claude.ai project (or a Shell project's `claudeProjects`), else "claude.ai".
   The sky shows a nudge when the import is over 7 days old. Tested with a fake
   export; **not yet with a real one**: check the format when Danny's arrives.
+- **Always on (2026-11-18):** Shell runs as a launchd login item
+  (`local.shell.server`, `scripts/install-login-item.sh`), log at
+  `~/Library/Logs/shell.log`. Re-run the script after code changes to restart.
+  Tested: plan engine reply works from the background service.
 - Checked in the browser at 1440×900 and 375×812: chat, notes, zoom levels,
   and a real message end to end.
 
@@ -87,7 +91,6 @@ by where it is, not by searching.
 
 ## Next steps
 
-- Keep Shell running without a terminal (a login item / launchd service).
 - Ideas: sent notes shown faded on old replies; v2 diff view; read aloud;
   search across chats from the sky.
 
