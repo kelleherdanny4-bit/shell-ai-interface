@@ -48,6 +48,14 @@ by where it is, not by searching.
     work in its own section.
   - `styles.css` is now one consolidated theme (the old layered editions are
     gone; see git history if needed).
+- **Claude app sessions (2026-11-18):** `listSessions` in `server.js` reads
+  `~/.claude/projects/*/*.jsonl` and files each session under a project (by
+  repo, or a project's `folders`) or a folder cloud ("No folder" for scratch).
+  Read-only in Shell (`readOnly`). Shell's own `claude -p` runs (`sdk-cli`) are
+  skipped. Next: continue a session in Shell by forking it
+  (`--resume <id> --fork-session`) with the project's knowledge. Cloud sessions
+  and claude.ai chats aren't on disk; a claude.ai data export import is the
+  way to bring those in.
 - Checked in the browser at 1440×900 and 375×812: chat, notes, zoom levels,
   and a real message end to end.
 

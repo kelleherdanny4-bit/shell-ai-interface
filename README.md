@@ -51,6 +51,8 @@ first run; it stays on your computer). Each one is a cloud in the sky.
 
 - `repo`: the folder Claude works in. `also`: extra folders it can read.
 - `shared` (top level): folders every **personal** project can read.
+- `folders`: other folder names whose Claude app sessions belong to this project,
+  e.g. `"folders": ["apartment-search"]` on Life.
 - `"group": "client"` puts a project in the **Clients** cloud bank, lower down with clear sky between. Client projects
   never get your personal folders, so client work stays sealed off.
 
@@ -71,6 +73,12 @@ Shortcuts are lowercase. A capital letter (the start of a sentence) always goes
 to the composer, so typing "Now…" never opens a new chat.
 
 Unsent notes are saved in the browser, so a reload never loses them.
+
+**Your Claude app sessions show up too.** Claude Code sessions on this computer
+(from the Claude app or the terminal) appear as clouds: under a project when they
+ran in its repo (or a folder it claims), otherwise under their own folder, and
+loose ones under "No folder". They're read-only in Shell for now. Sessions stored
+in the cloud and claude.ai chats aren't on this computer, so they can't appear.
 
 ## Settings
 

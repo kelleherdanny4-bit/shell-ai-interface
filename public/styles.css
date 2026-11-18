@@ -401,3 +401,8 @@ body.wide #notes-panel { display: none; }
 body.night .sky-cloud .name, body.night .sky-cloud .meta, body.night .map-cloud .name, body.night .map-cloud .meta { text-shadow: 0 0 calc(8px * var(--inv, 1)) rgb(200 200 198 / .7); }
 body.night .sky-cloud .meta, body.night .map-cloud .meta { color: #2a2520; }
 .map-cloud.new .name { white-space: nowrap; max-width: none; overflow: visible; display: block; }
+
+/* a session from the Claude app: read it here, continue it there */
+#ro-note { display: none; text-align: center; font-family: var(--font-pencil); font-size: 23px; color: var(--white); text-shadow: var(--sky-letter); padding: 10px 0 14px; }
+body.readonly #ro-note { display: block; }
+body.readonly .composer-row, body.readonly #attach, body.readonly .composer-meta { display: none; }

@@ -53,7 +53,8 @@ function loadProjects() {
     const extra = [...(p.also || []), ...(group === "personal" ? cfg.shared || [] : [])];
     const repoDir = p.repo ? dir(p.repo) : null;
     const dirs = [...new Set(extra.map(dir))].filter((d) => d !== repoDir && fs.existsSync(d));
-    return { id: p.id, name: p.name, group, repo: p.repo || null, cwd: repoDir && fs.existsSync(repoDir) ? repoDir : null, dirs, missing: !!repoDir && !fs.existsSync(repoDir) };
+    // `folders`: other folder names whose Claude app sessions belong to this project.
+    return { id: p.id, name: p.name, group, repo: p.repo || null, folders: p.folders || [], cwd: repoDir && fs.existsSync(repoDir) ? repoDir : null, dirs, missing: !!repoDir && !fs.existsSync(repoDir) };
   });
   return projects;
 }
@@ -109,6 +110,111 @@ async function listThreads() {
     } catch {}
   }
   return out.sort((a, b) => b.updated - a.updated);
+}
+
+// ---------- Claude app sessions (read-only) ----------
+// Claude Code sessions on this computer (from the Claude app or the terminal)
+// live in ~/.claude/projects/*/<session>.jsonl. Shell shows them as clouds:
+// under a Shell project when they ran in its repo, otherwise under their folder.
+// Sessions stored in the cloud are not on this computer and can't be shown.
+
+const CC_DIR = path.join(os.homedir(), ".claude", "projects");
+const ccCache = new Map(); // file → { key, session }
+
+const stripTags = (s) => String(s || "")
+  .replace(/<(system-reminder|command-[\w-]+|local-command-[\w-]+)>[\s\S]*?<\/\1>/g, "")
+  .replace(/<pasted_content[^>]*>([\s\S]*?)<\/pasted_content[^>]*>/g, "$1")
+  .trim();
+
+function textOf(content, { userSide = false } = {}) {
+  if (typeof content === "string") return userSide ? stripTags(content) : content;
+  if (!Array.isArray(content)) return "";
+  return content.filter((b) => b?.type === "text").map((b) => (userSide ? stripTags(b.text) : b.text)).filter(Boolean).join("\n\n");
+}
+
+// Read one session file: its title, folder, and the conversation (human turns and Claude's words).
+function parseSession(file) {
+  const st = fs.statSync(file);
+  const key = `${st.mtimeMs}:${st.size}`;
+  const hit = ccCache.get(file);
+  if (hit?.key === key) return hit.session;
+  let id = path.basename(file, ".jsonl"), title = "", cwd = "", relocated = "", entry = "", first = "";
+  const turns = [];
+  let reply = null;
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (!line) continue;
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+    if (d.type === "custom-title" && d.customTitle) title = d.customTitle;
+    else if (d.type === "relocated" && d.relocatedCwd) relocated = d.relocatedCwd;
+    if (d.isSidechain || d.isMeta) continue;
+    cwd ||= d.cwd || "";
+    entry ||= d.entrypoint || "";
+    const at = d.timestamp ? Date.parse(d.timestamp) : st.mtimeMs;
+    if (d.type === "user" && (d.origin?.kind === "human" || d.turnOrigin === "human" || typeof d.message?.content === "string")) {
+      const text = textOf(d.message?.content, { userSide: true });
+      if (!text) continue;
+      first ||= text;
+      reply = null;
+      turns.push({ id: d.uuid, role: "user", text, display: { text }, at });
+    } else if (d.type === "assistant") {
+      const text = textOf(d.message?.content).trim();
+      if (!text) continue;
+      // Claude's words across one turn (between tool calls) read as one reply.
+      if (reply) { reply.text += "\n\n" + text; reply.at = at; }
+      else { reply = { id: d.uuid, role: "assistant", text, title: "", at }; turns.push(reply); }
+    }
+  }
+  const session = {
+    id: "cc-" + id, sessionId: id, title: title || clipWords(first) || "Claude session",
+    cwd: relocated || cwd, entry, updated: st.mtimeMs, turns,
+  };
+  ccCache.set(file, { key, session });
+  return session;
+}
+
+const clipWords = (s, n = 8) => {
+  const w = String(s || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  return w.length ? w.slice(0, n).join(" ") + (w.length > n ? "…" : "") : "";
+};
+
+function listSessions(shellSessions) {
+  let dirs = [];
+  try { dirs = fs.readdirSync(CC_DIR); } catch { return []; }
+  const out = [];
+  for (const d of dirs) {
+    let files = [];
+    try { files = fs.readdirSync(path.join(CC_DIR, d)).filter((f) => f.endsWith(".jsonl")); } catch { continue; }
+    for (const f of files) {
+      try {
+        const s = parseSession(path.join(CC_DIR, d, f));
+        // Shell's own background runs are already Shell chats.
+        if (s.entry === "sdk-cli" || shellSessions.has(s.sessionId) || !s.turns.length) continue;
+        out.push(s);
+      } catch {}
+    }
+  }
+  return out;
+}
+
+// Which cloud a session belongs to: a Shell project if it ran in that project's
+// repo; otherwise its own folder; scratch sessions go under "No folder".
+function sessionHome(s, projects) {
+  const cwd = s.cwd || "";
+  const proj = projects.find((p) => p.cwd && (cwd === p.cwd || cwd.startsWith(p.cwd + path.sep)))
+    || projects.find((p) => p.folders.includes(path.basename(cwd)));
+  if (proj) return { id: proj.id };
+  if (!cwd || cwd.includes(`${path.sep}scratch-workspaces${path.sep}`)) return { id: "cc-nofolder", name: "No folder" };
+  const name = path.basename(cwd);
+  return { id: "cc-dir-" + name.toLowerCase().replace(/[^a-z0-9]+/g, "-"), name };
+}
+
+async function shellSessionIds() {
+  const ids = new Set();
+  for (const f of (await fsp.readdir(DATA_DIR)).filter((x) => x.endsWith(".json"))) {
+    try { const t = JSON.parse(await fsp.readFile(path.join(DATA_DIR, f), "utf8")); if (t.ccSession) ids.add(t.ccSession); } catch {}
+  }
+  return ids;
 }
 
 // Turn Danny's notes + typed text into one plain, readable message.
@@ -377,11 +483,30 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === "/api/projects") {
       const threads = await listThreads();
-      const projects = loadProjects().map((pr) => ({
+      const configured = loadProjects();
+      const projects = configured.map((pr) => ({
         id: pr.id, name: pr.name, group: pr.group, missing: pr.missing,
         threads: threads.filter((t) => t.projectId === pr.id),
       }));
-      return json(res, 200, projects);
+      // Claude app sessions on this computer join their project, or their folder's own cloud.
+      const extra = new Map();
+      for (const s of listSessions(await shellSessionIds())) {
+        const home = sessionHome(s, configured);
+        let proj = projects.find((x) => x.id === home.id) || extra.get(home.id);
+        if (!proj) extra.set(home.id, (proj = { id: home.id, name: home.name, group: "personal", fromClaude: true, threads: [] }));
+        proj.threads.push({ id: s.id, title: s.title, updated: s.updated, projectId: proj.id, docs: s.turns.filter((t) => t.role === "assistant").length, source: "claude" });
+      }
+      const all = [...projects, ...[...extra.values()].sort((a, b) => (a.id === "cc-nofolder") - (b.id === "cc-nofolder") || a.name.localeCompare(b.name))];
+      for (const pr of all) pr.threads.sort((a, b) => b.updated - a.updated);
+      return json(res, 200, all);
+    }
+    let cc = p.match(/^\/api\/threads\/cc-([\w-]+)$/);
+    if (cc && req.method === "GET") {
+      const file = fs.readdirSync(CC_DIR).map((d) => path.join(CC_DIR, d, cc[1] + ".jsonl")).find((f) => fs.existsSync(f));
+      if (!file) return json(res, 404, { error: "not found" });
+      const s = parseSession(file);
+      const home = sessionHome(s, loadProjects());
+      return json(res, 200, { id: s.id, title: s.title, projectId: home.id, turns: s.turns, readOnly: true, source: "claude", updated: s.updated });
     }
     if (p === "/api/threads" && req.method === "GET") return json(res, 200, await listThreads());
     if (p === "/api/threads" && req.method === "POST") {

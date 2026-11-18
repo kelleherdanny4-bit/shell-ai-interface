@@ -320,6 +320,8 @@ function renderThread() {
   feed.innerHTML = "";
   state.msgs = [];
   const t = state.thread;
+  // Sessions from the Claude app are shown, not continued (yet).
+  document.body.classList.toggle("readonly", !!t.readOnly);
   if (!t.turns.length) renderEmpty();
   for (const turn of t.turns) {
     if (turn.role === "user") makeYou(turn.display || { text: turn.text }, turn.at);
@@ -327,7 +329,7 @@ function renderThread() {
       const m = makeReply({ id: turn.id, text: turn.text, title: turn.title, at: turn.at });
       state.msgs.push(m);
       renderBody(m, { animate: false });
-      addGutters(m);
+      if (!t.readOnly) addGutters(m);
     }
   }
   loadNotes();
@@ -557,7 +559,7 @@ $("#pop-input").addEventListener("keydown", (e) => {
 
 function checkSelection() {
   const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || !sel.rangeCount || state.view !== "chat") return;
+  if (!sel || sel.isCollapsed || !sel.rangeCount || state.view !== "chat" || state.thread?.readOnly) return;
   const range = sel.getRangeAt(0);
   const m = state.msgs.find((x) => x.bodyEl.contains(range.commonAncestorContainer));
   if (!m || m.streaming) return;
@@ -590,7 +592,7 @@ function setBusy(b) {
 }
 
 function canSend() {
-  return !state.busy && (input.value.trim() || state.notes.length);
+  return !state.busy && !state.thread?.readOnly && (input.value.trim() || state.notes.length);
 }
 
 // The chat is saved the moment you first say something in it.
@@ -742,7 +744,8 @@ function renderDrawer() {
       head.innerHTML = `<button class="name" title="See ${esc(p.name)}'s chats as clouds"></button><button class="add" title="New chat in ${esc(p.name)}" aria-label="New chat in ${esc(p.name)}">+</button>`;
       $(".name", head).textContent = p.name;
       $(".name", head).addEventListener("click", () => { closeDrawer(); showChats(p.id); });
-      $(".add", head).addEventListener("click", () => { closeDrawer(); newChat(p.id); });
+      if (p.fromClaude) $(".add", head).remove();
+      else $(".add", head).addEventListener("click", () => { closeDrawer(); newChat(p.id); });
       list.appendChild(head);
       const chats = p.threads || [];
       if (!chats.length) {
@@ -755,6 +758,7 @@ function renderDrawer() {
         const b = document.createElement("button");
         b.className = "d-item" + (t.id === state.thread?.id ? " on" : "");
         b.innerHTML = `<span class="t"></span><span class="m">${esc(when(t.updated))}</span>`;
+        if (t.source === "claude") b.title = "From the Claude app (read-only here)";
         $(".t", b).textContent = t.title;
         b.addEventListener("click", () => { closeDrawer(); goToChat(t.id); });
         list.appendChild(b);
@@ -936,14 +940,16 @@ function skyLayout() {
   const personal = state.projects.filter((p) => p.group !== "client");
   const clients = state.projects.filter((p) => p.group === "client");
   const pos = {}, size = {};
-  const sz = (p) => { const w = (portrait ? 520 : 380) + 20 * Math.min(p.threads?.length || 0, 6); return [w, w * (portrait ? 0.4 : 0.5)]; };
   const n = personal.length;
+  // more projects, smaller clouds, so the sky never crowds
+  const base = portrait ? (n > 4 ? 380 : 520) : n > 4 ? 300 : 380, grow = n > 4 ? 10 : 20;
+  const sz = (p) => { const w = base + grow * Math.min(p.threads?.length || 0, 6); return [w, w * (portrait ? 0.4 : 0.5)]; };
   personal.forEach((p, i) => {
     if (portrait) pos[p.id] = [FW / 2 + (i % 2 ? 1 : -1) * FW * 0.1, 190 + (i + 0.5) * (980 / Math.max(1, n))];
     else if (n <= 4) pos[p.id] = [FW * (0.17 + 0.66 * (n === 1 ? 0.5 : i / (n - 1))), 340 + Math.sin(i * 2.2 + 0.9) * 95];
     else {
       const cols = Math.ceil(n / 2), row = i % 2, col = Math.floor(i / 2);
-      pos[p.id] = [FW * (0.14 + 0.72 * (cols === 1 ? 0.5 : col / (cols - 1))) + (row ? 80 : -40), 240 + row * 250 + Math.sin(i * 1.7) * 30];
+      pos[p.id] = [FW * (0.12 + 0.74 * (cols === 1 ? 0.5 : col / (cols - 1))) + (row ? 90 : -30), 320 + row * 270 + Math.sin(i * 1.7) * 25];
     }
     size[p.id] = sz(p);
   });
@@ -994,11 +1000,12 @@ const MAP = { clouds: [], byId: {}, newCloud: null, cols: 3, W: 860, H: 380, GX:
 function buildMap() {
   const proj = state.projects.find((p) => p.id === state.projectId);
   const chats = proj?.threads || []; // the server sorts them by last talked, newest first
-  const items = [{ id: null, isNew: true, title: "New chat", updated: null }, ...chats];
+  const items = proj?.fromClaude ? [...chats] : [{ id: null, isNew: true, title: "New chat", updated: null }, ...chats];
   const { vw, vh } = state.layout;
   const cols = (MAP.cols = vw < 760 || vh > vw * 1.15 ? 1 : items.length <= 4 ? 2 : 3);
   const { W, H, GX, GY } = MAP;
   MAP.byId = {};
+  MAP.newCloud = null;
   MAP.clouds = items.map((it, i) => {
     const col = i % cols, row = Math.floor(i / cols);
     // read like a page: newest top-left, older to the right and down, drifting a little
@@ -1023,6 +1030,7 @@ function buildMap() {
 
 // The chats you see first when you rise out of a chat: the newest three rows.
 function framed() {
+  if (!MAP.clouds.length) return { minX: -MAP.W, maxX: MAP.W, minY: -MAP.H, maxY: MAP.H };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const c of MAP.clouds.slice(0, MAP.cols * 3)) {
     minX = Math.min(minX, c.x - MAP.W * 0.62); maxX = Math.max(maxX, c.x + MAP.W * 0.62);
@@ -1052,7 +1060,7 @@ function renderMapLabels() {
     el.style.cssText = `left:${cl.x - cl.w / 2}px;top:${cl.y - cl.h / 2}px;width:${cl.w}px;height:${cl.h}px`;
     el.innerHTML = `<span class="name"></span><span class="meta"></span>`;
     $(".name", el).textContent = cl.isNew ? "+ New chat" : cl.item.title || "Untitled";
-    $(".meta", el).textContent = cl.isNew ? "start fresh" : when(cl.item.updated);
+    $(".meta", el).textContent = cl.isNew ? "start fresh" : when(cl.item.updated) + (cl.item.source === "claude" ? " · Claude app" : "");
     el.setAttribute("aria-label", cl.isNew ? "New chat" : `${cl.item.title}, ${when(cl.item.updated)}`);
     el.addEventListener("click", () => openFromMap(cl.id));
     hoverable(el, cl.key);
@@ -1062,7 +1070,7 @@ function renderMapLabels() {
   const w = document.createElement("div");
   w.className = "sky-word map-word";
   w.style.cssText = `left:${f.minX + 40}px;top:${f.minY - 60}px`;
-  w.textContent = `${projectName(state.projectId)}: your chats, newest first`;
+  w.textContent = `${projectName(state.projectId)}: ${MAP.clouds.length ? "your chats, newest first" : "no chats yet"}`;
   mapEl.appendChild(w);
 }
 
@@ -1122,7 +1130,7 @@ in vec2 a; void main() { gl_Position = vec4(a, 0., 1.); }`;
 // much grey (a cloud's underside, away from the light), and how cloudy it is.
 const FS_CELLS = `#version 300 es
 precision highp float;
-#define MAXP 64
+#define MAXP 96
 uniform vec2 uCell0; uniform float uPitch; uniform vec2 uRot;
 uniform vec4 uA[MAXP]; uniform int uNA; uniform vec4 uB[MAXP]; uniform int uNB;
 uniform float uW, uT, uDens, uOffA, uOffB; uniform vec2 uSh; uniform vec4 uMoon;
@@ -1315,7 +1323,7 @@ function ground() {
   addEventListener("resize", resize);
   cv.addEventListener("webglcontextlost", (e) => e.preventDefault());
 
-  const A = new Float32Array(64 * 4), B = new Float32Array(64 * 4);
+  const A = new Float32Array(96 * 4), B = new Float32Array(96 * 4);
 
   const frame = (now) => {
     requestAnimationFrame(frame);
@@ -1347,7 +1355,7 @@ function ground() {
     const t = reduceMotion ? 0 : now / 1000, TAU = Math.PI * 2;
     const vw = L.vw, vh = L.vh;
     const put = (arr, st, x, y, r, w) => {
-      if (st.n >= 64 || w < 0.004 || r < 0.8 || x < -r || y < -r || x > vw + r || y > vh + r) return;
+      if (st.n >= 96 || w < 0.004 || r < 0.8 || x < -r || y < -r || x > vw + r || y > vh + r) return;
       arr.set([x, y, r, w], st.n * 4);
       st.rs += r; st.n++;
     };
@@ -1473,7 +1481,7 @@ async function loadProjects() {
   return state.projects;
 }
 
-const chatCloud = () => (state.thread?.id && state.thread.projectId === state.projectId && MAP.byId[state.thread.id]) || MAP.newCloud;
+const chatCloud = () => (state.thread?.id && state.thread.projectId === state.projectId && MAP.byId[state.thread.id]) || MAP.newCloud || MAP.clouds[0] || { x: 0, y: 0 };
 
 function leaveChat() {
   hidePopover();
@@ -1587,6 +1595,10 @@ async function goToChat(id) {
 }
 
 async function newChat(pid = state.projectId) {
+  if (state.projects.find((p) => p.id === pid)?.fromClaude) {
+    pid = state.projects.find((p) => !p.fromClaude)?.id || pid;
+    toast(`New chats start in a Shell project: ${projectName(pid)}`);
+  }
   if (state.view === "chat") await swapFeed(() => draftThread(pid));
   else if (state.view === "chats" && pid === state.projectId) return openFromMap(null);
   else {
