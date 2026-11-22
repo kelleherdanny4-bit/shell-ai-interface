@@ -212,9 +212,39 @@ function sessionHome(s, projects) {
 async function shellSessionIds() {
   const ids = new Set();
   for (const f of (await fsp.readdir(DATA_DIR)).filter((x) => x.endsWith(".json"))) {
-    try { const t = JSON.parse(await fsp.readFile(path.join(DATA_DIR, f), "utf8")); if (t.ccSession) ids.add(t.ccSession); } catch {}
+    // A chat taken to the skeye but not yet answered still points at the original, which stays visible.
+    try { const t = JSON.parse(await fsp.readFile(path.join(DATA_DIR, f), "utf8")); if (t.ccSession && !t.ccFork) ids.add(t.ccSession); } catch {}
   }
   return ids;
+}
+
+// ---------- the skeye: continue a Claude app session in Shell ----------
+// "Take it to the skeye" links to /?skeye=<session id>. Shell copies the
+// conversation into a Shell chat and, on the first message, forks the session
+// (--resume <id> --fork-session) so Claude keeps all its context while the
+// original chat in the Claude app stays as it was.
+
+const ccFile = (id) => {
+  if (!/^[\w-]+$/.test(id)) return null;
+  try { return fs.readdirSync(CC_DIR).map((d) => path.join(CC_DIR, d, id + ".jsonl")).find((f) => fs.existsSync(f)) || null; } catch { return null; }
+};
+
+async function skeyeThread(sessionId) {
+  const file = ccFile(sessionId);
+  if (!file) return null;
+  const s = parseSession(file);
+  const projects = loadProjects();
+  const home = sessionHome(s, projects);
+  const projectId = projects.some((p) => p.id === home.id) ? home.id : projects[0].id;
+  // Taking the same chat up again before answering refreshes the copy instead of making another.
+  let t = null;
+  for (const f of (await fsp.readdir(DATA_DIR)).filter((x) => x.endsWith(".json"))) {
+    try { const x = JSON.parse(await fsp.readFile(path.join(DATA_DIR, f), "utf8")); if (x.ccFork && x.ccSession === sessionId) t = x; } catch {}
+  }
+  t ||= { id: newId(), created: Date.now() };
+  Object.assign(t, { title: s.title, projectId, ccSession: sessionId, ccFork: true, ccCwd: s.cwd || null, skeyeFrom: sessionId, turns: s.turns.map((x) => ({ ...x, title: "" })) });
+  await writeThread(t);
+  return t;
 }
 
 // ---------- claude.ai chats (from the data export) ----------
@@ -429,11 +459,14 @@ function streamPlan(send, thread, project, prompt, signal) {
       "--append-system-prompt", systemPrompt(project), "--allowedTools", ...PLAN_TOOLS];
     for (const d of project.dirs) args.push("--add-dir", d);
     if (thread.ccSession) args.push("--resume", thread.ccSession);
+    if (thread.ccSession && thread.ccFork) args.push("--fork-session");
     if (process.env.SHELL_PLAN_MODEL) args.push("--model", process.env.SHELL_PLAN_MODEL);
     const env = { ...process.env, CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: "1" };
     delete env.ANTHROPIC_API_KEY; // make sure this runs on the plan, not an API key
     delete env.ANTHROPIC_AUTH_TOKEN;
-    const child = spawn("claude", args, { cwd: project.cwd || here, env, stdio: ["pipe", "pipe", "pipe"] });
+    // A session can only be resumed from the folder it ran in.
+    const cwd = thread.ccCwd && fs.existsSync(thread.ccCwd) ? thread.ccCwd : project.cwd || here;
+    const child = spawn("claude", args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     signal.addEventListener("abort", () => child.kill("SIGTERM"));
     child.stdin.end(prompt);
 
@@ -515,7 +548,7 @@ async function handleSend(req, res, id) {
       }
     } else out = await streamDemo(send, content, "No Claude Code sign-in or API key found.");
 
-    if (out.session) thread.ccSession = out.session;
+    if (out.session) { thread.ccSession = out.session; delete thread.ccFork; }
     const firstAsk = thread.turns.find((t) => t.role === "user")?.display?.text || body.text || "";
     const assistant = { id: newId(), role: "assistant", text: out.text, title: titleOf(out.text, firstAsk), at: Date.now() };
     thread.turns.push(assistant);
@@ -607,11 +640,16 @@ const server = http.createServer(async (req, res) => {
     }
     let cc = p.match(/^\/api\/threads\/cc-([\w-]+)$/);
     if (cc && req.method === "GET") {
-      const file = fs.readdirSync(CC_DIR).map((d) => path.join(CC_DIR, d, cc[1] + ".jsonl")).find((f) => fs.existsSync(f));
+      const file = ccFile(cc[1]);
       if (!file) return json(res, 404, { error: "not found" });
       const s = parseSession(file);
       const home = sessionHome(s, loadProjects());
-      return json(res, 200, { id: s.id, title: s.title, projectId: home.id, turns: s.turns, readOnly: true, source: "claude", updated: s.updated });
+      return json(res, 200, { id: s.id, sessionId: s.sessionId, title: s.title, projectId: home.id, turns: s.turns, readOnly: true, source: "claude", updated: s.updated });
+    }
+    const sk = p.match(/^\/api\/skeye\/([\w-]+)$/);
+    if (sk && req.method === "POST") {
+      const t = await skeyeThread(sk[1]);
+      return t ? json(res, 200, t) : json(res, 404, { error: "That chat isn't on this computer." });
     }
     if (p === "/api/threads" && req.method === "GET") return json(res, 200, await listThreads());
     if (p === "/api/threads" && req.method === "POST") {

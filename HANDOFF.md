@@ -62,6 +62,15 @@ by where it is, not by searching.
   claude.ai project (or a Shell project's `claudeProjects`), else "claude.ai".
   The sky shows a nudge when the import is over 7 days old. Tested with a fake
   export; **not yet with a real one**: check the format when Danny's arrives.
+- **The skeye (2026-11-22):** "take it to the skeye" in any Claude Code chat
+  runs the `skeye` skill (`skills/skeye/`, installed to `~/.claude/skills/`),
+  which prints `localhost:4747/?skeye=<session id>`. `skeyeThread` in
+  `server.js` copies the session into a Shell chat (`ccFork`, `ccCwd`); the
+  first message runs `--resume <id> --fork-session` from the session's own
+  folder. Tested end to end on 2026-11-22: the fork remembered the chat, and
+  the original was untouched. Next: claude.ai chats via a local MCP connector
+  in the Claude desktop app (one-way copy), then the vision for opening it to
+  other people (Danny's idea 2).
 - **Always on (2026-11-18):** Shell runs as a launchd login item
   (`local.shell.server`, `scripts/install-login-item.sh`), log at
   `~/Library/Logs/shell.log`. Re-run the script after code changes to restart.

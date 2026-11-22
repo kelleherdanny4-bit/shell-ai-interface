@@ -327,7 +327,10 @@ function renderThread() {
     if (t.source === "claude.ai") {
       ro.innerHTML = `From claude.ai. Read-only here: <a target="_blank" rel="noopener">open it on claude.ai</a> to keep going.`;
       $("a", ro).href = t.url;
-    } else ro.textContent = "From the Claude app. Read-only here: open it in the Claude app to keep going.";
+    } else {
+      ro.innerHTML = `From the Claude app. <a href="#">Take it to the skeye</a> to keep going here.`;
+      $("a", ro).onclick = (e) => { e.preventDefault(); takeToSkeye(t.sessionId).catch(() => {}); };
+    }
   }
   if (!t.turns.length) renderEmpty();
   for (const turn of t.turns) {
@@ -353,6 +356,15 @@ async function openThread(id) {
   state.projectId = t.projectId;
   remember(id);
   renderThread();
+}
+
+// Bring a Claude app session into Shell as a chat you can keep going (the original stays as it was).
+async function takeToSkeye(sessionId) {
+  const t = await api(`/api/skeye/${encodeURIComponent(sessionId)}`, { method: "POST" });
+  await loadProjects().catch(() => {});
+  await openThread(t.id);
+  buildMap();
+  return t;
 }
 
 // A new chat is only a draft until you say something; nothing is saved before that.
@@ -1832,7 +1844,13 @@ async function boot() {
   const list = await api("/api/threads").catch(() => []);
   let last = null;
   try { last = localStorage.getItem("shell.lastThread"); } catch {}
-  const pick = list.find((t) => t.id === last) || list[0];
+  // "Take it to the skeye": /?skeye=<Claude app session id>
+  const skeye = new URLSearchParams(location.search).get("skeye");
+  let pick = list.find((t) => t.id === last) || list[0];
+  if (skeye) {
+    history.replaceState(null, "", location.pathname);
+    try { const t = await api(`/api/skeye/${encodeURIComponent(skeye)}`, { method: "POST" }); await loadProjects().catch(() => {}); pick = t; } catch {}
+  }
   state.projectId = pick?.projectId || state.projects[0]?.id;
   if (pick) await openThread(pick.id);
   else draftThread(state.projectId);

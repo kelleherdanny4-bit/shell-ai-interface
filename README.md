@@ -99,6 +99,24 @@ read-only with a link back to claude.ai. When the last import is over a week
 old, a pencil line up in the sky reminds you. Set `SHELL_EXPORT_DIRS` to watch
 other folders.
 
+## Take it to the skeye
+
+The skeye (Shell's sky editor) can pick up any Claude Code chat on this Mac,
+from the Code tab or the terminal. In that chat, say "take it to the skeye"
+(or anything like it). Claude replies with a link like
+`http://localhost:4747/?skeye=<session id>`. Open it and the chat is in the
+sky. Your next message forks the session, so Claude keeps all the context and
+the original chat stays as it was. Read-only Claude app clouds also have a
+"Take it to the skeye" link.
+
+The skill lives in `skills/skeye/`. Install or update it with:
+
+```bash
+mkdir -p ~/.claude/skills/skeye && cp skills/skeye/* ~/.claude/skills/skeye/
+```
+
+Not yet: claude.ai chats and cloud sessions (they aren't on this Mac).
+
 ## Settings
 
 | Env var | Default | What |
