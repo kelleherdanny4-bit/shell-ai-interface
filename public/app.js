@@ -1846,6 +1846,9 @@ async function boot() {
   try { last = localStorage.getItem("shell.lastThread"); } catch {}
   // "Take it to the skeye": /?skeye=<Claude app session id>
   const skeye = new URLSearchParams(location.search).get("skeye");
+  // /?thread=<id> opens that chat (the original chat links back to its skeye chat this way).
+  const want = new URLSearchParams(location.search).get("thread");
+  if (want) { history.replaceState(null, "", location.pathname); last = want; }
   let pick = list.find((t) => t.id === last) || list[0];
   if (skeye) {
     history.replaceState(null, "", location.pathname);

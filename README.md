@@ -109,13 +109,25 @@ sky. Your next message forks the session, so Claude keeps all the context and
 the original chat stays as it was. Read-only Claude app clouds also have a
 "Take it to the skeye" link.
 
-The skill lives in `skills/skeye/`. Install or update it with:
+**It comes back on its own.** Two things flow back to the original chat, no clicks:
+
+- **Files.** A skeye chat may edit files in the original chat's folder (only
+  there). The real file is the one copy, so there's nothing to sync. Claude
+  Code won't edit a file that changed since Claude last read it, so an edit
+  made elsewhere is never overwritten.
+- **The conversation.** After each reply, Shell writes the new turns to
+  `~/.claude/skeye/back/<session id>/`. A hook (`skills/skeye/bring-back.mjs`)
+  hands them to the original chat the next time you write there, once each.
+
+The skill lives in `skills/skeye/`. Install or update the skill and the hook with:
 
 ```bash
-mkdir -p ~/.claude/skills/skeye && cp skills/skeye/* ~/.claude/skills/skeye/
+scripts/install-skeye.sh
 ```
 
-Not yet: claude.ai chats and cloud sessions (they aren't on this Mac).
+Undo the hook with `scripts/install-skeye.sh --remove`.
+
+Not yet: claude.ai chats and cloud sessions (they aren't on this Mac). The original chat only catches up when you write in it; the app has no way to show it new turns on its own.
 
 ## Settings
 

@@ -242,9 +242,43 @@ async function skeyeThread(sessionId) {
     try { const x = JSON.parse(await fsp.readFile(path.join(DATA_DIR, f), "utf8")); if (x.ccFork && x.ccSession === sessionId) t = x; } catch {}
   }
   t ||= { id: newId(), created: Date.now() };
-  Object.assign(t, { title: s.title, projectId, ccSession: sessionId, ccFork: true, ccCwd: s.cwd || null, skeyeFrom: sessionId, turns: s.turns.map((x) => ({ ...x, title: "" })) });
+  // skeyeBase: how many turns came from the original; everything after it is new, and goes back.
+  Object.assign(t, { title: s.title, projectId, ccSession: sessionId, ccFork: true, ccCwd: s.cwd || null, skeyeFrom: sessionId, skeyeBase: s.turns.length, turns: s.turns.map((x) => ({ ...x, title: "" })) });
   await writeThread(t);
   return t;
+}
+
+// ---------- the skeye: bring it back ----------
+// Two things flow back to the chat a skeye chat came from, with no clicks:
+// 1. Files. A skeye chat may edit files in the original chat's own folder, so
+//    the real file is the one copy (no sync step). Claude Code's Edit and Write
+//    refuse to touch a file that changed since Claude last read it, so an edit
+//    made elsewhere is never overwritten: Claude has to re-read first.
+// 2. The conversation. After every reply Shell writes the new turns to
+//    ~/.claude/skeye/back/<original session id>/<thread>.json. A UserPromptSubmit hook
+//    (skills/skeye/bring-back.mjs) hands the turns it hasn't seen yet to the
+//    original chat the next time Danny writes there.
+
+const BACK_DIR = process.env.SKEYE_BACK_DIR || path.join(os.homedir(), ".claude", "skeye", "back");
+
+// Edits are allowed only inside the original chat's folder, never at home or root.
+function skeyeEditDir(thread) {
+  const d = thread.skeyeFrom && thread.ccCwd ? path.resolve(thread.ccCwd) : null;
+  if (!d || !fs.existsSync(d) || d === os.homedir() || !d.startsWith(os.homedir() + path.sep)) return null;
+  return d;
+}
+
+async function writeBack(thread) {
+  if (!thread.skeyeFrom || !/^[\w-]+$/.test(thread.skeyeFrom)) return;
+  const base = thread.skeyeBase ?? 0;
+  const turns = thread.turns.slice(base).map((x) => ({ id: x.id, role: x.role, at: x.at, text: x.text, files: x.files }));
+  const out = { from: thread.skeyeFrom, threadId: thread.id, title: thread.title, url: `http://localhost:${PORT}/?thread=${thread.id}`, updated: Date.now(), turns };
+  // One folder per original chat, one file per skeye chat (it can go up more than once).
+  const dir = path.join(BACK_DIR, thread.skeyeFrom);
+  await fsp.mkdir(dir, { recursive: true });
+  const file = path.join(dir, `${thread.id}.json`);
+  await fsp.writeFile(file + ".tmp", JSON.stringify(out, null, 2));
+  await fsp.rename(file + ".tmp", file); // whole file or nothing, so the hook never reads half of it
 }
 
 // ---------- claude.ai chats (from the data export) ----------
@@ -457,11 +491,15 @@ function streamPlan(send, thread, project, prompt, signal) {
   return new Promise((resolve, reject) => {
     const args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
       "--append-system-prompt", systemPrompt(project), "--allowedTools", ...PLAN_TOOLS];
+    // A skeye chat works on the same files as the chat it came from, so it may edit them.
+    const editDir = skeyeEditDir(thread);
+    if (editDir) args.push(`Edit(/${editDir}/**)`, `Write(/${editDir}/**)`);
     for (const d of project.dirs) args.push("--add-dir", d);
     if (thread.ccSession) args.push("--resume", thread.ccSession);
     if (thread.ccSession && thread.ccFork) args.push("--fork-session");
     if (process.env.SHELL_PLAN_MODEL) args.push("--model", process.env.SHELL_PLAN_MODEL);
-    const env = { ...process.env, CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: "1" };
+    // SHELL_RUN: the skeye bring-back hook stays quiet in Shell's own runs (they already have the turns).
+    const env = { ...process.env, CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: "1", SHELL_RUN: "1" };
     delete env.ANTHROPIC_API_KEY; // make sure this runs on the plan, not an API key
     delete env.ANTHROPIC_AUTH_TOKEN;
     // A session can only be resumed from the folder it ran in.
@@ -471,6 +509,7 @@ function streamPlan(send, thread, project, prompt, signal) {
     child.stdin.end(prompt);
 
     let text = "", buf = "", stderr = "", session = null, lastStop = null, result = null;
+    const files = new Set(); // files Claude edited this turn (tried; Claude Code refuses stale edits)
     child.stdout.on("data", (chunk) => {
       buf += chunk;
       let i;
@@ -495,7 +534,10 @@ function streamPlan(send, thread, project, prompt, signal) {
             lastStop = e.delta?.stop_reason || lastStop;
           }
         } else if (ev.type === "assistant") {
-          for (const b of ev.message?.content || []) if (b.type === "tool_use") send("activity", { text: describeTool(b.name, b.input) });
+          for (const b of ev.message?.content || []) if (b.type === "tool_use") {
+            send("activity", { text: describeTool(b.name, b.input) });
+            if ((b.name === "Edit" || b.name === "Write") && b.input?.file_path) files.add(b.input.file_path);
+          }
         } else if (ev.type === "result") {
           result = ev;
         }
@@ -513,7 +555,7 @@ function streamPlan(send, thread, project, prompt, signal) {
         text = result.result;
         send("delta", { text });
       }
-      resolve({ text, session });
+      resolve({ text, session, files: [...files] });
     });
   });
 }
@@ -551,9 +593,11 @@ async function handleSend(req, res, id) {
     if (out.session) { thread.ccSession = out.session; delete thread.ccFork; }
     const firstAsk = thread.turns.find((t) => t.role === "user")?.display?.text || body.text || "";
     const assistant = { id: newId(), role: "assistant", text: out.text, title: titleOf(out.text, firstAsk), at: Date.now() };
+    if (out.files?.length) assistant.files = out.files;
     thread.turns.push(assistant);
     if (!thread.title || thread.title === "New thread") thread.title = assistant.title;
     await writeThread(thread);
+    await writeBack(thread).catch((err) => console.log(`  ! couldn't write skeye turns back: ${err.message}`));
     send("done", { doc: assistant, threadTitle: thread.title });
   } catch (err) {
     // Roll back the user turn so the next send doesn't create two user turns in a row.

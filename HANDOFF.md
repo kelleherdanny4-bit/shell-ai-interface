@@ -71,6 +71,17 @@ by where it is, not by searching.
   the original was untouched. Next: claude.ai chats via a local MCP connector
   in the Claude desktop app (one-way copy), then the vision for opening it to
   other people (Danny's idea 2).
+- **Skeye sync-back (2026-11-22, branch `claude/skeye-sync-back`):** a skeye
+  chat may Edit/Write inside the original chat's folder only (`skeyeEditDir`),
+  so the real file is the one copy. Claude Code refuses stale edits, so outside
+  changes survive (tested). After each reply `writeBack` saves new turns to
+  `~/.claude/skeye/back/<session>/<thread>.json`; the `bring-back.mjs`
+  UserPromptSubmit hook hands unseen turns to the original chat (tested with a
+  real resumed session). `scripts/install-skeye.sh` installs skill + hook.
+  Shell runs set `SHELL_RUN=1` so the hook stays quiet there. Limits: turns
+  arrive only when Danny next writes in the original chat; re-taking a chat
+  that already went up makes a new skeye chat from the original (which by then
+  has the turns, via the hook).
 - **Always on (2026-11-18):** Shell runs as a launchd login item
   (`local.shell.server`, `scripts/install-login-item.sh`), log at
   `~/Library/Logs/shell.log`. Re-run the script after code changes to restart.
