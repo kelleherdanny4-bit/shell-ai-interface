@@ -5,7 +5,7 @@
 // project is a cloud. One world, one camera.
 import { marked } from "/vendor/marked.js";
 import DOMPurify from "/vendor/purify.js";
-import { initPage, openPage, newPage, closePage, pageIsOpen, currentPage, askWholePage, openPicker } from "/page.js";
+import { initPage, openPage, newPage, closePage, pageIsOpen, currentPage, askWholePage, openPicker, dismissPageMenus } from "/page.js";
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -51,6 +51,19 @@ function measureComposer() {
   const h = Math.round($("#composer").getBoundingClientRect().height) + 24;
   state.layout.composerH = h;
   document.documentElement.style.setProperty("--composer-h", h + "px");
+}
+
+// Fixed controls use layout-viewport coordinates, including while pinch-panned.
+function measureVisibleViewport() {
+  const viewport = window.visualViewport;
+  const root = document.documentElement.style;
+  root.setProperty("--visible-top", `${viewport.offsetTop}px`);
+  root.setProperty("--visible-left", `${viewport.offsetLeft}px`);
+  root.setProperty("--visible-right", `${innerWidth - viewport.offsetLeft - viewport.width}px`);
+  root.setProperty("--visible-bottom", `${innerHeight - viewport.offsetTop - viewport.height}px`);
+  root.setProperty("--visible-width", `${viewport.width}px`);
+  root.setProperty("--visible-height", `${viewport.height}px`);
+  document.body.classList.toggle("compact-chrome", viewport.width <= 760);
 }
 
 // ---------------------------------------------------------------- camera
@@ -788,11 +801,11 @@ function updateCrumb() {
 }
 
 async function openDrawer() {
+  $("#drawer").classList.add("open");
+  $("#drawer-scrim").hidden = false;
   await loadProjects().catch(() => {});
   state.pages = await api("/api/pages").catch(() => []);
   renderDrawer();
-  $("#drawer").classList.add("open");
-  $("#drawer-scrim").hidden = false;
 }
 function closeDrawer() {
   $("#drawer").classList.remove("open");
@@ -1721,19 +1734,14 @@ function overviewControls() {
   });
   addEventListener("pointerup", () => { if (drag?.moved) suppressClick = true; drag = null; setTimeout(() => (suppressClick = false), 0); });
   viewportEl.addEventListener("click", (e) => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); } }, true);
-  // One continuous zoom: scroll or pinch from this project's chats up into the sky and back.
+  // Ordinary scrolling changes the overview camera. Pinch belongs to the browser.
   let settle;
   addEventListener("wheel", (e) => {
-    if (!far()) {
-      // in a chat, the wheel scrolls; a pinch outward rises out of it
-      if (e.ctrlKey && e.deltaY > 0) { e.preventDefault(); zoomOut(); }
-      return;
-    }
-    if (e.target.closest?.("#drawer, #notes-panel")) return;
+    if (e.ctrlKey || !far() || !viewportEl.contains(e.target)) return;
     e.preventDefault();
     if (flight) return;
     const c = state.cam, L = state.layout;
-    const s1 = Math.max((SKY.g?.sSky || 0.02) * 0.75, Math.min(0.9, c.s * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018))));
+    const s1 = Math.max((SKY.g?.sSky || 0.02) * 0.75, Math.min(0.9, c.s * Math.exp(-e.deltaY * 0.0018)));
     // keep the point under the cursor still
     const th = (-c.r * Math.PI) / 180, mx = e.clientX - L.cx, my = e.clientY - L.cy;
     const wx = mx * Math.cos(th) + my * Math.sin(th), wy = -mx * Math.sin(th) + my * Math.cos(th);
@@ -1803,6 +1811,25 @@ $("#attach-clear").addEventListener("click", () => {
   if (!confirm(`Discard ${state.notes.length} notes?`)) return;
   state.notes = [];
   saveNotes();
+});
+
+$("#btn-type").addEventListener("click", async () => {
+  closeDrawer();
+  dismissPageMenus();
+  $("#notes-panel").classList.remove("open");
+  hidePopover();
+  if (state.view !== "chat") {
+    if (state.thread?.projectId !== state.projectId && !pageIsOpen()) draftThread(shellProject());
+    setView("chat");
+    const cloud = chatCloud();
+    flyTo({ x: cloud.x, y: cloud.y, s: 1.1, r: 0 }, { duration: 1, dip: false });
+    tweenChatK(1, 700);
+  }
+  if (document.body.classList.contains("readonly")) {
+    await newChat();
+  } else {
+    input.focus({ preventScroll: true });
+  }
 });
 
 addEventListener("keydown", (e) => {
@@ -1906,6 +1933,17 @@ async function boot() {
   initPage({ api, toast, esc, marked, DOMPurify, input, projectName, projectId: () => shellProject(), onOpen: pageOpened, onClose: pageClosed });
   $("#btn-page").addEventListener("click", startPage);
   if (innerWidth <= 760) input.placeholder = "Say something";
+  if (window.visualViewport) {
+    visualViewport.addEventListener("resize", measureVisibleViewport);
+    visualViewport.addEventListener("scroll", measureVisibleViewport);
+    addEventListener("resize", measureVisibleViewport);
+    measureVisibleViewport();
+  }
+  new ResizeObserver(() => {
+    const bar = $("#page-bar");
+    document.documentElement.style.setProperty("--page-bar-h", `${bar.offsetHeight}px`);
+  }).observe($("#page-bar"));
+  new ResizeObserver(measureComposer).observe($("#composer"));
   measure();
   setChatK(0);
   setView("chat");
