@@ -642,7 +642,7 @@ async function listPages() {
   for (const f of (await fsp.readdir(PAGES_DIR)).filter((x) => x.endsWith(".json"))) {
     try {
       const pg = JSON.parse(await fsp.readFile(path.join(PAGES_DIR, f), "utf8"));
-      out.push({ id: pg.id, title: pg.title, projectId: pg.projectId, updated: pg.updated, file: pg.file || null });
+      out.push({ id: pg.id, title: pg.title, projectId: pg.projectId, updated: pg.updated, file: pg.file || null, fromThread: pg.fromThread || null, fromReply: pg.fromReply || null });
     } catch {}
   }
   return out.sort((a, b) => b.updated - a.updated);
@@ -688,6 +688,14 @@ async function createPage(body) {
   const project = projectById(body.projectId);
   const pg = { id: newId(), projectId: project.id, md: String(body.md || ""), created: Date.now() };
   if (body.fromThread) pg.fromThread = body.fromThread;
+  if (body.fromReply) {
+    // One page per reply: "Edit as page" again reopens your edits, not a fresh copy.
+    for (const p of await listPages()) if (p.fromThread === body.fromThread && p.fromReply === body.fromReply) {
+      const old = await readPage(p.id);
+      if (old) return old;
+    }
+    pg.fromReply = body.fromReply;
+  }
   if (body.file) {
     const file = path.resolve(String(body.file));
     if (!PAGE_EXT.test(file) || !insideRoots(file, pageRoots(project))) throw Object.assign(new Error("Shell can only open .md and .txt files in this project's folders."), { code: 403 });

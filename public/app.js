@@ -241,7 +241,7 @@ function makeReply(m, { arrive = false } = {}) {
   m.marginEl = $(".marginalia", el);
   $(".reply-edit", el).addEventListener("click", () => {
     if (m.streaming) return;
-    newPage({ projectId: shellProject(state.thread?.projectId), md: m.text, fromThread: state.thread?.id }).catch((err) => toast(err.message, true));
+    newPage({ projectId: shellProject(state.thread?.projectId), md: m.text, fromThread: state.thread?.id, fromReply: m.id }).catch((err) => toast(err.message, true));
   });
   feed.appendChild(el);
   return m;

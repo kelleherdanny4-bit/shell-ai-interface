@@ -145,8 +145,8 @@ export async function openPage(id) {
   await show(pg);
 }
 
-export async function newPage({ projectId, md = "", fromThread } = {}) {
-  const pg = await ctx.api("/api/pages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, md, fromThread }) });
+export async function newPage({ projectId, md = "", fromThread, fromReply } = {}) {
+  const pg = await ctx.api("/api/pages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId, md, fromThread, fromReply }) });
   await show(pg, { fresh: !md });
   return pg;
 }
