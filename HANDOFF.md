@@ -121,3 +121,14 @@ by where it is, not by searching.
   Flag this tension; don't ignore it.
 - Shell is logged as ADD tool ideas in `steering-add/ideas/tools-for-add.md`.
 - Standing rule in both repos: break silos, connect dots, help Danny lead.
+- **Pages (2026-11-22):** Danny wants the text editor to be the best part of
+  the skeye: edit like Word, but better. `public/page.js` is a contenteditable
+  sheet (`#page`) with a toolbar, Markdown autoformat, clean paste, and Claude
+  as editor: a selection → `/api/pages/:id/ask` with `selection` → inline or
+  block tracked change; the composer → whole page → block LCS diff
+  (`diffInto`) → one tracked change per changed stretch. Markdown is the
+  storage (`toMarkdown`), in `data/pages/`; pages from files write back with an
+  mtime check (409 on conflict). Prompt: `prompts/page.md`. Tested in the
+  browser with real Claude on 2026-11-22. Next ideas: word-level diffs inside
+  a changed paragraph, notes/comments on a page, pages as clouds on the map.
+

@@ -28,6 +28,94 @@
     <div id="spacer" aria-hidden="true"></div>
   </main>
 
+  <!-- A page: a document you edit like Word. Claude's edits arrive as tracked changes. -->
+  <section id="page" aria-label="Page" hidden>
+    <article id="sheet">
+      <div id="page-file"></div>
+      <div id="page-body" class="doc-body" contenteditable="true" spellcheck="true" aria-label="Page text"></div>
+    </article>
+  </section>
+  <div id="page-bar" role="toolbar" aria-label="Formatting">
+    <button data-cmd="close" class="pb-back" title="Back to the chat (Esc)" aria-label="Back to the chat">
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <select id="pg-style" title="Text style (⌘⌥0–3)" aria-label="Text style">
+      <option value="p">Text</option>
+      <option value="h1">Title</option>
+      <option value="h2">Heading</option>
+      <option value="h3">Subheading</option>
+      <option value="blockquote">Quote</option>
+      <option value="ul">• List</option>
+      <option value="ol">1. List</option>
+    </select>
+    <span class="pb-sep"></span>
+    <button data-fmt="bold" title="Bold (⌘B)" aria-label="Bold"><b>B</b></button>
+    <button data-fmt="italic" title="Italic (⌘I)" aria-label="Italic"><i>I</i></button>
+    <button data-fmt="underline" title="Underline (⌘U)" aria-label="Underline"><u>U</u></button>
+    <button data-fmt="strikeThrough" title="Strikethrough (⌘⇧X)" aria-label="Strikethrough"><s>S</s></button>
+    <button data-fmt="insertUnorderedList" title="Bullets (⌘⇧8)" aria-label="Bullets">
+      <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1" /><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>
+    </button>
+    <button data-fmt="insertOrderedList" title="Numbers (⌘⇧7)" aria-label="Numbered list">
+      <svg viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10M4 5l1.5-1v5M3.5 14.5c.3-.8 2.5-1 2.5.3 0 1-2.5 1.9-2.5 3.2H6"/></svg>
+    </button>
+    <button data-fmt="link" title="Link (⌘K)" aria-label="Link">
+      <svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>
+    </button>
+    <span class="pb-sep"></span>
+    <button data-cmd="ask" class="pb-ask" title="Ask Claude to edit the selection (⌘J)">✦ Ask Claude</button>
+    <span class="pb-grow"></span>
+    <span id="pg-work" hidden></span>
+    <span id="pg-count"></span>
+    <span id="pg-saved"></span>
+    <button data-cmd="menu" title="More" aria-label="More">
+      <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg>
+    </button>
+    <div id="pg-menu" hidden>
+      <button data-m="copy">Copy (for Docs, Word, email)</button>
+      <button data-m="md">Copy as Markdown</button>
+      <button data-m="open">Open a file…</button>
+      <button data-m="new">New page</button>
+      <button data-m="delete" class="danger">Delete page</button>
+    </div>
+  </div>
+  <div id="sug-bar" hidden>
+    <span class="n"></span>
+    <button data-all="next">Show</button>
+    <button data-all="accept" class="primary">Accept all</button>
+    <button data-all="reject">Reject all</button>
+  </div>
+
+  <!-- Select words on a page: format them, or ask Claude to change them -->
+  <div id="bubble" hidden>
+    <div class="bub-row">
+      <button data-fmt="bold" title="Bold (⌘B)"><b>B</b></button>
+      <button data-fmt="italic" title="Italic (⌘I)"><i>I</i></button>
+      <button data-fmt="link" title="Link (⌘K)">Link</button>
+      <button data-b="ask" class="primary" title="Ask Claude (⌘J)">✦ Ask Claude</button>
+    </div>
+    <div class="bub-ask">
+      <textarea id="ask-input" rows="1" placeholder="What should Claude do with this?"></textarea>
+      <div class="bub-quick">
+        <button data-quick="Tighten this. Cut every word that isn't doing work.">Tighten</button>
+        <button data-quick="Make this clearer and plainer.">Clearer</button>
+        <button data-quick="Rewrite this so it sounds like me talking.">Sound like me</button>
+        <button data-quick="Fix spelling, grammar and punctuation only. Change nothing else.">Fix grammar</button>
+        <button data-quick="Give me a stronger version of this.">Stronger</button>
+        <button data-b="go" class="primary">Go ↵</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Open a .md or .txt file from this project as a page -->
+  <div id="file-picker" hidden>
+    <div class="fp-box" role="dialog" aria-labelledby="fp-title">
+      <div class="panel-head"><span class="label" id="fp-title">Open a file</span><button class="panel-close" id="fp-close" aria-label="Close">×</button></div>
+      <input id="fp-q" placeholder="Search by name" autocomplete="off" />
+      <div id="fp-list"></div>
+    </div>
+  </div>
+
   <header id="hud-top">
     <div class="pill">
       <button class="hud-btn" id="btn-threads" title="All chats (T)" aria-label="All chats">
@@ -39,6 +127,9 @@
     <div class="hud-right">
       <button class="hud-btn" id="btn-overview" title="Rise (O)" aria-label="Zoom out">
         <svg viewBox="0 0 24 24"><path d="M5 15c-1.7 0-3-1.2-3-2.8S3.3 9.5 5 9.5c.3-2.5 2.4-4.5 5-4.5 2.2 0 4 1.3 4.7 3.2.4-.1.8-.2 1.3-.2 2.5 0 4.5 1.8 4.5 4.2S18.5 16 16 16H5z"/><path d="M12 22v-4M10 20l2-2 2 2"/></svg>
+      </button>
+      <button class="hud-btn" id="btn-page" title="New page: a document you edit, with Claude as editor" aria-label="New page">
+        <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/></svg>
       </button>
       <button class="hud-btn" id="btn-new" title="New chat (N)" aria-label="New chat">
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
@@ -95,6 +186,7 @@
   <aside id="drawer" aria-label="All chats">
     <div class="panel-head"><span class="label">Chats</span><button class="panel-close" id="drawer-close" aria-label="Close">×</button></div>
     <div id="drawer-list"></div>
+    <div class="drawer-pages"><button id="drawer-page">▤ New page</button><button id="drawer-file">Open a file as a page…</button></div>
     <button id="drawer-sky" class="drawer-sky">Rise into the sky of all projects</button>
   </aside>
 

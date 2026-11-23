@@ -49,6 +49,32 @@ After pulling new code, run the script again to restart Shell.
 Other ways to run: `ANTHROPIC_API_KEY=sk-ant-... SHELL_ENGINE=api npm start`
 (API key, billed separately), or `npm run demo` (canned replies).
 
+## Pages: edit like Word, with Claude as your editor
+
+A page is a sheet of paper in the sky that you edit yourself. Type, format,
+paste from anywhere. Claude edits only when you ask, and its edits come back
+as **tracked changes** (struck in red, Claude's words underlined in blue) that
+you accept or reject one by one or all at once.
+
+- **Start one:** the page icon in the top right, **Edit as page** on any reply
+  cloud, or the drawer (**t**): New page, or Open a file as a page.
+- **Format:** the toolbar, or the usual keys: ⌘B / ⌘I / ⌘U, ⌘⇧X strike,
+  ⌘K link, ⌘⌥1–3 headings (⌘⌥0 text), ⌘⇧8 bullets, ⌘⇧7 numbers, Tab to
+  indent a bullet. Or type Markdown: `# `, `## `, `- `, `1. `, `> `.
+- **Paste** from Google Docs, Word, a web page or a Markdown file: headings,
+  lists, bold and italic stay; fonts and colours go.
+- **Ask Claude about some words:** select them → **✦ Ask Claude** (or ⌘J) →
+  Tighten, Clearer, Sound like me, Fix grammar, Stronger, or say anything.
+- **Ask Claude about the whole page:** type in the composer at the bottom
+  ("cut this to half", "add a section on pricing"). Every stretch Claude
+  changed becomes its own tracked change.
+- **Get it out:** ⋯ → Copy (rich text for Docs, Word or email) or Copy as
+  Markdown.
+- **Saving** is automatic. Pages live in `data/pages/`. A page opened from a
+  `.md` / `.txt` file in the project's folders saves straight back to that
+  file (front matter kept). If the file changed outside Shell since you
+  opened it, Shell stops and asks: load theirs, or keep yours.
+
 ## Projects: the sky
 
 Your projects live in `projects.json` (made from `projects.example.json` on
@@ -77,6 +103,7 @@ first run; it stays on your computer). Each one is a cloud in the sky.
 | Zoom out | **o**: this project's chats as clouds, newest first. **o** again: every project. Or scroll / pinch, all the way up and back down |
 | All projects | **p**, or click **Shell** in the top left. Click a cloud to dive in; **Esc** or **Enter** goes back down where you were |
 | All chats | **t** lists every chat by project, like folders. **n** starts a new chat (saved once you say something) |
+| Write a page | The page icon (top right), **Edit as page** on any reply, or **t** → New page / Open a file. See below |
 
 Shortcuts are lowercase. A capital letter (the start of a sentence) always goes
 to the composer, so typing "Now…" never opens a new chat.

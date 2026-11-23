@@ -487,10 +487,10 @@ function describeTool(name, input = {}) {
 }
 
 // Run Claude Code headless, on the user's own Claude plan.
-function streamPlan(send, thread, project, prompt, signal) {
+function streamPlan(send, thread, project, prompt, signal, system = systemPrompt(project)) {
   return new Promise((resolve, reject) => {
     const args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-      "--append-system-prompt", systemPrompt(project), "--allowedTools", ...PLAN_TOOLS];
+      "--append-system-prompt", system, "--allowedTools", ...PLAN_TOOLS];
     // A skeye chat works on the same files as the chat it came from, so it may edit them.
     const editDir = skeyeEditDir(thread);
     if (editDir) args.push(`Edit(/${editDir}/**)`, `Write(/${editDir}/**)`);
@@ -612,6 +612,162 @@ async function handleSend(req, res, id) {
   res.end();
 }
 
+// ---------- pages: documents you edit like Word, with Claude as the editor ----------
+// A page is Markdown in data/pages/<id>.json. A page opened from a file in a
+// project's folders saves straight back to that file (refusing if the file
+// changed on disk since it was opened, so nothing is overwritten).
+
+const PAGES_DIR = path.join(here, "data", "pages");
+fs.mkdirSync(PAGES_DIR, { recursive: true });
+const pagePath = (id) => path.join(PAGES_DIR, `${id.replace(/[^a-z0-9-]/gi, "")}.json`);
+const PAGE_EXT = /\.(md|markdown|txt)$/i;
+
+async function readPage(id) {
+  try { return JSON.parse(await fsp.readFile(pagePath(id), "utf8")); } catch { return null; }
+}
+async function writePage(pg) {
+  pg.updated = Date.now();
+  pg.title = pageTitle(pg.md, pg.file);
+  await fsp.writeFile(pagePath(pg.id), JSON.stringify(pg, null, 2));
+}
+function pageTitle(md = "", file) {
+  const h = md.match(/^#{1,3}\s+(.+)$/m);
+  if (h) return h[1].replace(/[*_`]/g, "").trim().slice(0, 80);
+  if (file) return path.basename(file);
+  const line = md.split("\n").map((l) => l.replace(/^[#>*\-\d.\s]+/, "").trim()).find(Boolean);
+  return line ? line.split(/\s+/).slice(0, 7).join(" ").replace(/[.,;:!?]+$/, "") : "Untitled page";
+}
+async function listPages() {
+  const out = [];
+  for (const f of (await fsp.readdir(PAGES_DIR)).filter((x) => x.endsWith(".json"))) {
+    try {
+      const pg = JSON.parse(await fsp.readFile(path.join(PAGES_DIR, f), "utf8"));
+      out.push({ id: pg.id, title: pg.title, projectId: pg.projectId, updated: pg.updated, file: pg.file || null });
+    } catch {}
+  }
+  return out.sort((a, b) => b.updated - a.updated);
+}
+
+// Folders a project may open files from: its repo and the folders it can read.
+function pageRoots(project) {
+  return [project.cwd, ...project.dirs].filter(Boolean);
+}
+function insideRoots(file, roots) {
+  const real = path.resolve(file);
+  return roots.some((r) => real === r || real.startsWith(r + path.sep));
+}
+function listDocFiles(project) {
+  const out = [];
+  const skip = new Set(["node_modules", ".git", "data", "dist", "build", ".next", "vendor"]);
+  const walk = (dir, root, depth) => {
+    if (depth > 5 || out.length > 600) return;
+    let ents = [];
+    try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      if (e.name.startsWith(".") || skip.has(e.name)) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full, root, depth + 1);
+      else if (PAGE_EXT.test(e.name)) {
+        let mtime = 0;
+        try { mtime = fs.statSync(full).mtimeMs; } catch {}
+        out.push({ path: full, label: path.join(path.basename(root), path.relative(root, full)), mtime });
+      }
+    }
+  };
+  for (const r of pageRoots(project)) walk(r, r, 0);
+  return out.sort((a, b) => b.mtime - a.mtime);
+}
+
+// Front matter stays in the file but out of the editor.
+function splitFront(text) {
+  const m = text.match(/^---\n[\s\S]*?\n---\n?/);
+  return m ? { front: m[0], md: text.slice(m[0].length) } : { front: "", md: text };
+}
+
+async function createPage(body) {
+  const project = projectById(body.projectId);
+  const pg = { id: newId(), projectId: project.id, md: String(body.md || ""), created: Date.now() };
+  if (body.fromThread) pg.fromThread = body.fromThread;
+  if (body.file) {
+    const file = path.resolve(String(body.file));
+    if (!PAGE_EXT.test(file) || !insideRoots(file, pageRoots(project))) throw Object.assign(new Error("Shell can only open .md and .txt files in this project's folders."), { code: 403 });
+    // One page per file: opening it again picks up where you were.
+    for (const p of await listPages()) if (p.file === file) {
+      const old = await readPage(p.id);
+      const st = fs.statSync(file);
+      if (st.mtimeMs !== old.fileMtime) { // changed elsewhere since: take the file as it is now
+        const { front, md } = splitFront(fs.readFileSync(file, "utf8"));
+        Object.assign(old, { md, front, fileMtime: st.mtimeMs });
+        await writePage(old);
+      }
+      return old;
+    }
+    const { front, md } = splitFront(fs.readFileSync(file, "utf8"));
+    Object.assign(pg, { file, md, front, fileMtime: fs.statSync(file).mtimeMs });
+  }
+  await writePage(pg);
+  return pg;
+}
+
+async function savePage(pg, md) {
+  pg.md = String(md ?? "");
+  if (pg.file) {
+    let st = null;
+    try { st = fs.statSync(pg.file); } catch {}
+    if (st && pg.fileMtime && Math.abs(st.mtimeMs - pg.fileMtime) > 1) {
+      return { conflict: true, error: `${path.basename(pg.file)} changed outside Shell since you opened it.` };
+    }
+    const text = (pg.front || "") + pg.md.replace(/\s*$/, "\n");
+    await fsp.writeFile(pg.file, text);
+    pg.fileMtime = fs.statSync(pg.file).mtimeMs;
+  }
+  await writePage(pg);
+  return { ok: true, title: pg.title, updated: pg.updated };
+}
+
+function pageSystem(project) {
+  const base = fs.readFileSync(path.join(here, "prompts", "page.md"), "utf8");
+  const ctx = loadContext();
+  return `${base.trim()}\n\nThis page belongs to Danny's **${project.name}** project.${ctx.text ? `\n\n# Standing context\n\n${ctx.text}` : ""}`;
+}
+
+// Claude edits the page: a passage (selection) or the whole thing. Returns Markdown only.
+function pagePrompt({ instruction, md, selection }) {
+  if (selection?.text) {
+    return `Here is the whole page, for context:\n\n<page>\n${md}\n</page>\n\nRewrite only this passage from it:\n\n<passage>\n${selection.text}\n</passage>\n\n` +
+      `${selection.inline ? "The passage sits inside a paragraph, so return inline text only: no headings, no list markers, no blank lines." : "Return whole blocks in Markdown."}\n\n` +
+      `Danny's instruction: ${instruction}\n\nReturn only the new passage. No preamble, no quotes around it, no explanation.`;
+  }
+  return `Here is the page:\n\n<page>\n${md}\n</page>\n\nDanny's instruction: ${instruction}\n\n` +
+    "Return the whole revised page in Markdown and nothing else. Change only what the instruction calls for and keep every other line exactly as it is, so your changes show up as tracked edits.";
+}
+function cleanOut(text) {
+  let t = String(text || "").trim();
+  const fence = t.match(/^```(?:markdown|md)?\n([\s\S]*?)\n```$/);
+  if (fence) t = fence[1];
+  return t.replace(/^<\/?(page|passage)>\n?|\n?<\/(page|passage)>$/g, "").trim();
+}
+
+async function askPage(pg, body, signal) {
+  const project = projectById(pg.projectId);
+  const prompt = pagePrompt({ instruction: String(body.instruction || "").trim(), md: String(body.md ?? pg.md), selection: body.selection });
+  let text = "";
+  if (ENGINE === "plan") {
+    // The page's own folder, so Claude can read the files around it.
+    const thread = { ccCwd: pg.file ? path.dirname(pg.file) : project.cwd };
+    text = (await streamPlan(() => {}, thread, project, prompt, signal, pageSystem(project))).text;
+  } else if (ENGINE === "api") {
+    const msg = await client.messages.create({ model: MODEL, max_tokens: 32000, output_config: { effort: "low" }, system: pageSystem(project), messages: [{ role: "user", content: prompt }] }, { signal });
+    text = msg.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+  } else {
+    // demo: a visible, harmless edit
+    await sleep(700);
+    const src = body.selection?.text || String(body.md ?? pg.md);
+    text = body.selection?.text ? src.replace(/\bvery\s+/gi, "").replace(/^./, (c) => c.toUpperCase()) + " (demo edit)" : src.replace(/\n\n/, "\n\n*(Demo edit: Claude would revise this page here.)*\n\n");
+  }
+  return cleanOut(text);
+}
+
 // ---------- http plumbing ----------
 
 function readBody(req) {
@@ -713,6 +869,50 @@ const server = http.createServer(async (req, res) => {
     }
     m = p.match(/^\/api\/threads\/([\w-]+)\/send$/);
     if (m && req.method === "POST") return handleSend(req, res, m[1]);
+
+    // ---- pages ----
+    if (p === "/api/pages" && req.method === "GET") return json(res, 200, await listPages());
+    if (p === "/api/pages" && req.method === "POST") {
+      try { return json(res, 200, await createPage(await readBody(req))); }
+      catch (err) { return json(res, err.code || 500, { error: err.message }); }
+    }
+    if (p === "/api/files" && req.method === "GET") {
+      return json(res, 200, listDocFiles(projectById(url.searchParams.get("projectId"))).slice(0, 300));
+    }
+    m = p.match(/^\/api\/pages\/([\w-]+)$/);
+    if (m && req.method === "GET") {
+      const pg = await readPage(m[1]);
+      return pg ? json(res, 200, pg) : json(res, 404, { error: "not found" });
+    }
+    if (m && req.method === "PUT") {
+      const pg = await readPage(m[1]);
+      if (!pg) return json(res, 404, { error: "not found" });
+      const body = await readBody(req);
+      if (body.reload && pg.file) { // take the file as it is on disk now
+        const { front, md } = splitFront(fs.readFileSync(pg.file, "utf8"));
+        Object.assign(pg, { md, front, fileMtime: fs.statSync(pg.file).mtimeMs });
+        await writePage(pg);
+        return json(res, 200, pg);
+      }
+      if (body.force && pg.file) pg.fileMtime = fs.statSync(pg.file).mtimeMs;
+      const out = await savePage(pg, body.md);
+      return json(res, out.conflict ? 409 : 200, out);
+    }
+    if (m && req.method === "DELETE") {
+      await fsp.rm(pagePath(m[1]), { force: true }); // the page only; a file it came from stays
+      return json(res, 200, { ok: true });
+    }
+    m = p.match(/^\/api\/pages\/([\w-]+)\/ask$/);
+    if (m && req.method === "POST") {
+      const pg = await readPage(m[1]);
+      if (!pg) return json(res, 404, { error: "not found" });
+      const body = await readBody(req);
+      if (!String(body.instruction || "").trim()) return json(res, 400, { error: "Say what to change." });
+      const abort = new AbortController();
+      res.on("close", () => { if (!res.writableEnded) abort.abort(); });
+      try { return json(res, 200, { text: await askPage(pg, body, abort.signal) }); }
+      catch (err) { return json(res, 500, { error: String(err?.message || err) }); }
+    }
 
     if (VENDOR[p]) return serveFile(res, path.join(here, VENDOR[p]));
     const safe = path.normalize(p === "/" ? "/index.html" : p).replace(/^(\.\.[/\\])+/, "");

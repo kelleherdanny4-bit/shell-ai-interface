@@ -5,6 +5,7 @@
 // project is a cloud. One world, one camera.
 import { marked } from "/vendor/marked.js";
 import DOMPurify from "/vendor/purify.js";
+import { initPage, openPage, newPage, closePage, pageIsOpen, currentPage, askWholePage, openPicker } from "/page.js";
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -234,10 +235,14 @@ function puffsFor(seed) {
 function makeReply(m, { arrive = false } = {}) {
   const el = document.createElement("section");
   el.className = "msg reply" + (arrive ? " arrive" : "");
-  el.innerHTML = `<div class="shape">${puffsFor(hashStr(m.id))}<div class="body"><div class="reply-head">${fmtTime(m.at)}</div><div class="doc-body"></div></div></div><aside class="marginalia" aria-label="Your notes on this reply"></aside>`;
+  el.innerHTML = `<div class="shape">${puffsFor(hashStr(m.id))}<div class="body"><div class="reply-head">${fmtTime(m.at)}<button class="reply-edit" title="Open this reply as a page you can edit">Edit as page</button></div><div class="doc-body"></div></div></div><aside class="marginalia" aria-label="Your notes on this reply"></aside>`;
   m.el = el;
   m.bodyEl = $(".doc-body", el);
   m.marginEl = $(".marginalia", el);
+  $(".reply-edit", el).addEventListener("click", () => {
+    if (m.streaming) return;
+    newPage({ projectId: shellProject(state.thread?.projectId), md: m.text, fromThread: state.thread?.id }).catch((err) => toast(err.message, true));
+  });
   feed.appendChild(el);
   return m;
 }
@@ -611,6 +616,7 @@ function setBusy(b) {
 }
 
 function canSend() {
+  if (pageIsOpen()) return !state.busy && !!input.value.trim();
   return !state.busy && !state.thread?.readOnly && (input.value.trim() || state.notes.length);
 }
 
@@ -624,6 +630,7 @@ async function ensureThread(thread) {
 
 async function send() {
   if (!canSend()) return;
+  if (pageIsOpen()) return sendToPage();
   const text = input.value.trim();
   const notes = state.notes.map(({ quote, note, docTitle }) => ({ quote, note, docTitle }));
   const sentNotes = state.notes;
@@ -721,17 +728,68 @@ async function send() {
   }
 }
 
+// On a page, what you type is an instruction to Claude about the whole page.
+async function sendToPage() {
+  const text = input.value.trim();
+  input.value = "";
+  autoGrow();
+  input.blur();
+  setBusy(true);
+  try {
+    if (!(await askWholePage(text))) { input.value = text; autoGrow(); }
+  } finally {
+    setBusy(false);
+  }
+}
+
+// New things start in one of your Shell projects, not a read-only folder cloud.
+function shellProject(pid = state.projectId) {
+  const p = state.projects.find((x) => x.id === pid);
+  return p && !p.fromClaude ? pid : state.projects.find((x) => !x.fromClaude)?.id || pid;
+}
+
+async function startPage() {
+  try {
+    if (state.view !== "chat") { setView("chat"); tweenChatK(1, 700); }
+    leaveChat();
+    await newPage({ projectId: shellProject() });
+  } catch (err) {
+    toast("Couldn't start a page: " + err.message, true);
+  }
+}
+
+const CHAT_PLACEHOLDER = () => (innerWidth <= 760 ? "Say something" : "Say something to the sky");
+const CHAT_META = $("#composer-meta").innerHTML;
+
+function pageOpened(pg) {
+  document.body.classList.remove("readonly");
+  input.placeholder = innerWidth <= 760 ? "Tell Claude a change" : "Tell Claude what to change on this page";
+  $("#composer-meta").innerHTML = "Enter: Claude edits the whole page as tracked changes · select words to edit just those (⌘J)";
+  measureComposer();
+  updateCrumb();
+}
+
+function pageClosed() {
+  input.placeholder = CHAT_PLACEHOLDER();
+  $("#composer-meta").innerHTML = CHAT_META;
+  if (state.thread) document.body.classList.toggle("readonly", !!state.thread.readOnly);
+  measureComposer();
+  updateCrumb();
+}
+
 // ---------------------------------------------------------------- header, drawer, toast
 
 function updateCrumb() {
   const crumb = $("#crumb-project"), title = $("#thread-title");
   if (state.view === "sky") { crumb.textContent = "All projects"; title.textContent = ""; return; }
-  crumb.textContent = projectName(state.projectId);
-  title.textContent = state.view === "chat" ? state.thread?.title || "New chat" : "";
+  const pg = state.view === "chat" && currentPage();
+  crumb.textContent = projectName(pg ? pg.projectId : state.projectId);
+  title.textContent = pg ? `▤ ${pg.title || "Untitled page"}` : state.view === "chat" ? state.thread?.title || "New chat" : "";
 }
 
 async function openDrawer() {
   await loadProjects().catch(() => {});
+  state.pages = await api("/api/pages").catch(() => []);
   renderDrawer();
   $("#drawer").classList.add("open");
   $("#drawer-scrim").hidden = false;
@@ -780,6 +838,19 @@ function renderDrawer() {
         if (t.source) b.title = `From ${t.source === "claude.ai" ? "claude.ai" : "the Claude app"} (read-only here)`;
         $(".t", b).textContent = t.title;
         b.addEventListener("click", () => { closeDrawer(); goToChat(t.id); });
+        list.appendChild(b);
+      }
+      for (const pg of (state.pages || []).filter((x) => x.projectId === p.id).slice(0, 6)) {
+        const b = document.createElement("button");
+        b.className = "d-item page" + (pg.id === currentPage()?.id ? " on" : "");
+        b.innerHTML = `<span class="t"></span><span class="m">${esc(when(pg.updated))}</span>`;
+        $(".t", b).textContent = pg.title;
+        if (pg.file) b.title = pg.file;
+        b.addEventListener("click", async () => {
+          closeDrawer();
+          if (state.view !== "chat") { leaveChat(); setView("chat"); tweenChatK(1, 700); }
+          openPage(pg.id).catch((e) => toast("Couldn't open that page: " + e.message, true));
+        });
         list.appendChild(b);
       }
       if (chats.length > 8) {
@@ -1503,6 +1574,7 @@ async function loadProjects() {
 const chatCloud = () => (state.thread?.id && state.thread.projectId === state.projectId && MAP.byId[state.thread.id]) || MAP.newCloud || MAP.clouds[0] || { x: 0, y: 0 };
 
 function leaveChat() {
+  if (pageIsOpen()) closePage();
   hidePopover();
   closeDrawer();
   $("#notes-panel").classList.remove("open");
@@ -1602,6 +1674,7 @@ async function swapFeed(fn) {
 }
 
 async function goToChat(id) {
+  if (pageIsOpen()) await closePage();
   if (state.view === "chat") {
     if (id === state.thread?.id) return;
     return swapFeed(() => openThread(id).catch((e) => toast("Couldn't open that chat: " + e.message, true)));
@@ -1614,6 +1687,7 @@ async function goToChat(id) {
 }
 
 async function newChat(pid = state.projectId) {
+  if (pageIsOpen()) await closePage();
   if (state.projects.find((p) => p.id === pid)?.fromClaude) {
     pid = state.projects.find((p) => !p.fromClaude)?.id || pid;
     toast(`New chats start in a Shell project: ${projectName(pid)}`);
@@ -1713,6 +1787,12 @@ $("#btn-threads").addEventListener("click", openDrawer);
 $("#drawer-close").addEventListener("click", closeDrawer);
 $("#drawer-scrim").addEventListener("click", closeDrawer);
 $("#drawer-sky").addEventListener("click", () => { closeDrawer(); showSky(); });
+$("#drawer-page").addEventListener("click", () => { closeDrawer(); startPage(); });
+$("#drawer-file").addEventListener("click", () => {
+  closeDrawer();
+  if (state.view !== "chat") { leaveChat(); setView("chat"); tweenChatK(1, 700); }
+  openPicker();
+});
 $("#btn-new").addEventListener("click", () => newChat());
 $("#brand").addEventListener("click", () => (state.view === "sky" ? diveBack() : showSky()));
 $("#crumb-project").addEventListener("click", () => (state.view === "chat" ? showChats() : diveBack()));
@@ -1740,6 +1820,8 @@ addEventListener("keydown", (e) => {
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "Escape" && $("#drawer").classList.contains("open")) return closeDrawer();
+  if (pageIsOpen() && e.key === "Escape") return closePage();
+  if (pageIsOpen() && e.key === "o") return closePage().then(zoomOut);
   if (state.view !== "chat") {
     if (e.key === "o") zoomOut();
     else if (["Escape", "Enter", "i"].includes(e.key)) diveBack();
@@ -1821,6 +1903,8 @@ async function checkSync() {
 }
 
 async function boot() {
+  initPage({ api, toast, esc, marked, DOMPurify, input, projectName, projectId: () => shellProject(), onOpen: pageOpened, onClose: pageClosed });
+  $("#btn-page").addEventListener("click", startPage);
   if (innerWidth <= 760) input.placeholder = "Say something";
   measure();
   setChatK(0);
@@ -1857,6 +1941,11 @@ async function boot() {
   state.projectId = pick?.projectId || state.projects[0]?.id;
   if (pick) await openThread(pick.id);
   else draftThread(state.projectId);
+  // /?page=<id>, or the page you had open when you left
+  let pageId = new URLSearchParams(location.search).get("page");
+  if (pageId) history.replaceState(null, "", location.pathname);
+  else try { pageId = localStorage.getItem("shell.lastPage"); } catch {}
+  if (pageId) openPage(pageId).catch(() => { try { localStorage.removeItem("shell.lastPage"); } catch {} });
   buildMap();
   // Open just above this chat's cloud, then sink into it.
   const cl = chatCloud();
