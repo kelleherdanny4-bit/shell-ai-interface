@@ -159,7 +159,8 @@ export async function openFile(file, projectId, fromThread) {
 }
 
 async function show(pg, { fresh = false } = {}) {
-  if (P.page && P.dirty) await flushSave();
+  if (P.page && P.conflict && P.dirty) ctx.toast(`Your last edits to "${P.page.title || "that page"}" weren't saved: it changed elsewhere`, true);
+  if (P.page && (P.dirty || P.saving)) await flushSave();
   P.page = pg;
   P.dirty = false;
   P.conflict = false;
@@ -201,10 +202,12 @@ export function setEditable(on) {
 // A chat about the page may have changed its file. Coming back in, take the file as it is.
 export async function refreshFromDisk() {
   const pg = P.page;
-  if (!pg?.file || P.dirty) return false;
+  if (!pg?.file || P.dirty || P.saving || P.conflict) return false;
   const res = await fetch("/api/pages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file: pg.file, projectId: pg.projectId, fromThread: pg.fromThread }) });
   if (!res.ok || P.page !== pg) return false;
   const fresh = await res.json();
+  if (P.dirty || P.saving) return false; // you typed while it was loading: yours wins, saved as usual
+  pg.rev = fresh.rev;
   if (fresh.md === pg.md) return false;
   const top = el.root.scrollTop;
   P.page = fresh;
@@ -218,7 +221,8 @@ export async function refreshFromDisk() {
 export async function closePage() {
   if (!P.page) return;
   if (el.body.querySelector(".sug, .sug-block")) ctx.toast("Claude's unreviewed edits were left out");
-  if (P.dirty) await flushSave();
+  if (P.conflict && P.dirty) ctx.toast("Your last edits weren't saved: the page changed elsewhere", true);
+  if (P.dirty || P.saving) await flushSave();
   P.page = null;
   hideBubble();
   el.menu.hidden = true;
@@ -245,36 +249,60 @@ function markDirty() {
   P.saveT = setTimeout(() => flushSave(), 700);
 }
 
-async function flushSave(beacon = false, extra = {}) {
+// One save at a time, each naming the version it was made on (rev). Saves used
+// to overlap, and the server took the second one for an outside change.
+function flushSave(beacon = false, extra = {}) {
   clearTimeout(P.saveT);
   const pg = P.page;
-  if (!pg || (!P.dirty && !extra.force)) return;
+  if (!pg || (!P.dirty && !extra.force) || (P.conflict && !extra.force)) return P.saving || Promise.resolve();
+  if (beacon) {
+    // Leaving the page: send what's there now. If a save is still on its way, this one follows it.
+    const rev = (pg.rev || 0) + (P.saving ? 1 : 0);
+    fetch(`/api/pages/${pg.id}`, { method: "PUT", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ md: toMarkdown(), rev }) });
+    return Promise.resolve();
+  }
+  if (P.saving) { P.again = true; return P.saving; } // goes out as soon as the one in flight lands
+  P.saving = saveOnce(pg, extra).finally(() => {
+    P.saving = null;
+    if (P.again && P.page === pg) { P.again = false; if (P.dirty) return flushSave(); }
+    P.again = false;
+  });
+  return P.saving;
+}
+
+async function saveOnce(pg, extra) {
   const md = toMarkdown();
   P.dirty = false;
   setSaved("Saving…");
-  const req = fetch(`/api/pages/${pg.id}`, { method: "PUT", keepalive: beacon, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ md, ...extra }) });
-  if (beacon) return;
   try {
-    const res = await req;
+    const res = await fetch(`/api/pages/${pg.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ md, rev: pg.rev ?? null, ...extra }) });
     const out = await res.json();
     if (res.status === 409) {
-      P.conflict = true;
       P.dirty = true;
+      if (P.page !== pg) return;
+      P.conflict = true;
       el.saved.className = "warn";
-      el.saved.innerHTML = `File changed outside Shell. <button data-c="reload">Load theirs</button> <button data-c="force">Keep mine</button>`;
+      el.saved.innerHTML = `<span class="why"></span> <button data-c="reload">Load theirs</button> <button data-c="force">Keep mine</button>`;
+      $(".why", el.saved).textContent = pg.file && !/window/.test(out.error || "") ? "File changed outside Shell." : "Saved elsewhere too.";
+      el.saved.title = out.error || "";
       return;
     }
     if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
     pg.title = out.title;
     pg.md = md;
-    if (P.page === pg) {
+    pg.rev = out.rev;
+    if (P.page === pg && !P.dirty) {
+      el.saved.title = "";
       setSaved(pg.file ? `Saved to ${pg.file.split("/").pop()}` : "Saved");
       ctx.onOpen?.(pg);
     }
   } catch (err) {
     P.dirty = true;
+    if (P.page !== pg) return;
     setSaved("Not saved", "warn");
     ctx.toast("Couldn't save the page: " + err.message, true);
+    clearTimeout(P.saveT);
+    P.saveT = setTimeout(() => flushSave(), 5000); // try again shortly: the server may be restarting
   }
 }
 
@@ -282,7 +310,8 @@ async function resolveConflict(how) {
   const pg = P.page;
   if (!pg) return;
   P.conflict = false;
-  if (how === "force") return flushSave(false, { force: true });
+  el.saved.title = "";
+  if (how === "force") { P.dirty = true; return flushSave(false, { force: true }); }
   const fresh = await ctx.api(`/api/pages/${pg.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reload: true }) });
   P.dirty = false;
   await show(fresh);

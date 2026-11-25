@@ -628,7 +628,38 @@ async function readPage(id) {
 async function writePage(pg) {
   pg.updated = Date.now();
   pg.title = pageTitle(pg.md, pg.file);
-  await fsp.writeFile(pagePath(pg.id), JSON.stringify(pg, null, 2));
+  // Write aside, then swap in: a reader never sees half a page.
+  const dest = pagePath(pg.id), tmp = `${dest}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await fsp.writeFile(tmp, JSON.stringify(pg, null, 2));
+  await fsp.rename(tmp, dest);
+}
+
+// One change to a page at a time. Saves that arrived together used to read the
+// same old page, so the second one thought the file had changed under it.
+const pageLocks = new Map();
+function withPage(id, fn) {
+  const prev = pageLocks.get(id) || Promise.resolve();
+  const run = prev.then(fn, fn);
+  const tail = run.catch(() => {});
+  pageLocks.set(id, tail);
+  tail.then(() => { if (pageLocks.get(id) === tail) pageLocks.delete(id); });
+  return run;
+}
+
+const hashText = (t) => crypto.createHash("sha1").update(t).digest("hex");
+// What's in the file now, and whether that differs from what this page last saw there.
+function fileState(pg) {
+  let st = null;
+  try { st = fs.statSync(pg.file); } catch { return { missing: true }; }
+  if (pg.fileMtime && Math.abs(st.mtimeMs - pg.fileMtime) <= 1) return { st, changed: false };
+  const text = fs.readFileSync(pg.file, "utf8");
+  // Touched but not changed (a git checkout, an editor's save-as-is, a sync tool): not a conflict.
+  const changed = !pg.fileHash || hashText(text) !== pg.fileHash;
+  return { st, text, changed };
+}
+function takeFile(pg, text = fs.readFileSync(pg.file, "utf8")) {
+  const { front, md } = splitFront(text);
+  Object.assign(pg, { md, front, fileMtime: fs.statSync(pg.file).mtimeMs, fileHash: hashText(text) });
 }
 function pageTitle(md = "", file) {
   const h = md.match(/^#{1,3}\s+(.+)$/m);
@@ -706,36 +737,49 @@ async function createPage(body) {
     if (!PAGE_EXT.test(file) || !insideRoots(file, roots)) throw Object.assign(new Error("Shell can only open .md and .txt files in this project's folders."), { code: 403 });
     // One page per file: opening it again picks up where you were.
     for (const p of await listPages()) if (p.file === file) {
-      const old = await readPage(p.id);
-      const st = fs.statSync(file);
-      if (st.mtimeMs !== old.fileMtime) { // changed elsewhere since: take the file as it is now
-        const { front, md } = splitFront(fs.readFileSync(file, "utf8"));
-        Object.assign(old, { md, front, fileMtime: st.mtimeMs });
-        await writePage(old);
-      }
-      return old;
+      return withPage(p.id, async () => {
+        const old = await readPage(p.id);
+        const fsNow = fileState(old);
+        if (fsNow.changed) { // changed elsewhere since: take the file as it is now
+          takeFile(old, fsNow.text);
+          old.rev = (old.rev || 0) + 1;
+          await writePage(old);
+        } else if (!old.fileHash && !fsNow.missing) { takeFile(old); await writePage(old); } // pages from before hashes
+        return old;
+      });
     }
-    const { front, md } = splitFront(fs.readFileSync(file, "utf8"));
-    Object.assign(pg, { file, md, front, fileMtime: fs.statSync(file).mtimeMs });
+    pg.file = file;
+    takeFile(pg);
   }
   await writePage(pg);
   return pg;
 }
 
-async function savePage(pg, md) {
-  pg.md = String(md ?? "");
-  if (pg.file) {
-    let st = null;
-    try { st = fs.statSync(pg.file); } catch {}
-    if (st && pg.fileMtime && Math.abs(st.mtimeMs - pg.fileMtime) > 1) {
-      return { conflict: true, error: `${path.basename(pg.file)} changed outside Shell since you opened it.` };
-    }
-    const text = (pg.front || "") + pg.md.replace(/\s*$/, "\n");
-    await fsp.writeFile(pg.file, text);
-    pg.fileMtime = fs.statSync(pg.file).mtimeMs;
+// Every save says which version of the page it was made on (rev). If the page
+// moved on since (another window saved, or the file changed on disk), nothing is
+// overwritten: the save comes back as a conflict and you choose.
+async function savePage(pg, md, { rev, force = false } = {}) {
+  pg.rev ||= 0;
+  if (!force && rev != null && rev !== pg.rev) {
+    return { conflict: true, rev: pg.rev, error: "This page was saved from another window since you opened it." };
   }
+  md = String(md ?? "");
+  if (pg.file) {
+    const now = fileState(pg);
+    const text = (pg.front || "") + md.replace(/\s*$/, "\n");
+    if (!force && now.changed && now.text !== text) {
+      return { conflict: true, rev: pg.rev, error: `${path.basename(pg.file)} changed outside Shell since you opened it.` };
+    }
+    if (now.missing || now.changed || md !== pg.md) {
+      await fsp.writeFile(pg.file, text);
+      pg.fileMtime = fs.statSync(pg.file).mtimeMs;
+      pg.fileHash = hashText(text);
+    }
+  }
+  pg.md = md;
+  pg.rev++;
   await writePage(pg);
-  return { ok: true, title: pg.title, updated: pg.updated };
+  return { ok: true, title: pg.title, updated: pg.updated, rev: pg.rev };
 }
 
 function pageSystem(project) {
@@ -898,21 +942,21 @@ const server = http.createServer(async (req, res) => {
       return pg ? json(res, 200, pg) : json(res, 404, { error: "not found" });
     }
     if (m && req.method === "PUT") {
-      const pg = await readPage(m[1]);
-      if (!pg) return json(res, 404, { error: "not found" });
       const body = await readBody(req);
-      if (body.reload && pg.file) { // take the file as it is on disk now
-        const { front, md } = splitFront(fs.readFileSync(pg.file, "utf8"));
-        Object.assign(pg, { md, front, fileMtime: fs.statSync(pg.file).mtimeMs });
-        await writePage(pg);
-        return json(res, 200, pg);
-      }
-      if (body.force && pg.file) pg.fileMtime = fs.statSync(pg.file).mtimeMs;
-      const out = await savePage(pg, body.md);
-      return json(res, out.conflict ? 409 : 200, out);
+      const [code, out] = await withPage(m[1], async () => {
+        const pg = await readPage(m[1]);
+        if (!pg) return [404, { error: "not found" }];
+        if (body.reload) { // take the latest: the file as it is on disk, or the page as last saved
+          if (pg.file && fs.existsSync(pg.file)) { takeFile(pg); pg.rev = (pg.rev || 0) + 1; await writePage(pg); }
+          return [200, pg];
+        }
+        const r = await savePage(pg, body.md, { rev: body.rev, force: !!body.force });
+        return [r.conflict ? 409 : 200, r];
+      });
+      return json(res, code, out);
     }
     if (m && req.method === "DELETE") {
-      await fsp.rm(pagePath(m[1]), { force: true }); // the page only; a file it came from stays
+      await withPage(m[1], () => fsp.rm(pagePath(m[1]), { force: true })); // the page only; a file it came from stays
       return json(res, 200, { ok: true });
     }
     m = p.match(/^\/api\/pages\/([\w-]+)\/ask$/);
