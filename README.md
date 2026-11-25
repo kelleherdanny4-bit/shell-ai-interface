@@ -136,6 +136,14 @@ sky. Your next message forks the session, so Claude keeps all the context and
 the original chat stays as it was. Read-only Claude app clouds also have a
 "Take it to the skeye" link.
 
+**It starts in the document.** When the chat is about a piece of writing,
+Claude passes the file and the link opens straight into it as a page you edit
+like Word (`&doc=<file>`). Pinch out (trackpad, or two fingers on a phone)
+and the page floats up into the corner while the chat about it opens around
+it: now you're talking it over, and the page is read-only. Pinch in, click the
+little sheet, or press I to sink back in and write. Pinch out once more to
+rise to the project's chats. Esc or O also steps out of the page.
+
 **It comes back on its own.** Two things flow back to the original chat, no clicks:
 
 - **Files.** A skeye chat may edit files in the original chat's folder (only

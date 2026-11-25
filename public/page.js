@@ -151,8 +151,8 @@ export async function newPage({ projectId, md = "", fromThread, fromReply } = {}
   return pg;
 }
 
-export async function openFile(file, projectId) {
-  const res = await fetch("/api/pages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file, projectId }) });
+export async function openFile(file, projectId, fromThread) {
+  const res = await fetch("/api/pages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file, projectId, fromThread }) });
   const pg = await res.json();
   if (!res.ok) throw new Error(pg.error || `HTTP ${res.status}`);
   await show(pg);
@@ -165,6 +165,8 @@ async function show(pg, { fresh = false } = {}) {
   P.conflict = false;
   el.body.innerHTML = mdToHtml(pg.md) || "";
   if (!el.body.firstElementChild) el.body.innerHTML = "<p><br></p>";
+  P.locked = false;
+  el.body.contentEditable = "true";
   el.file.innerHTML = pg.file
     ? `<span class="pf-label">Saves to</span> <span class="pf-path"></span>`
     : `<span class="pf-label">${ctx.esc(ctx.projectName(pg.projectId) || "Page")}</span>`;
@@ -177,7 +179,7 @@ async function show(pg, { fresh = false } = {}) {
   updateCount();
   try { localStorage.setItem("shell.lastPage", pg.id); } catch {}
   ctx.onOpen?.(pg);
-  if (!matchMedia("(pointer: coarse)").matches) {
+  if (!matchMedia("(pointer: coarse)").matches && !P.locked) {
     el.body.focus({ preventScroll: true });
     const first = fresh ? el.body.firstElementChild : el.body.lastElementChild;
     const r = document.createRange();
@@ -186,6 +188,31 @@ async function show(pg, { fresh = false } = {}) {
     getSelection().removeAllRanges();
     getSelection().addRange(r);
   }
+}
+
+// Stepped back from the page (pinched out to its chat): you can read it, not type in it.
+export function setEditable(on) {
+  P.locked = !on;
+  if (!P.page) return;
+  if (!P.asking) el.body.contentEditable = on ? "true" : "false";
+  if (!on) { hideBubble(); el.menu.hidden = true; if (el.body.contains(document.activeElement)) el.body.blur(); }
+}
+
+// A chat about the page may have changed its file. Coming back in, take the file as it is.
+export async function refreshFromDisk() {
+  const pg = P.page;
+  if (!pg?.file || P.dirty) return false;
+  const res = await fetch("/api/pages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file: pg.file, projectId: pg.projectId, fromThread: pg.fromThread }) });
+  if (!res.ok || P.page !== pg) return false;
+  const fresh = await res.json();
+  if (fresh.md === pg.md) return false;
+  const top = el.root.scrollTop;
+  P.page = fresh;
+  el.body.innerHTML = mdToHtml(fresh.md) || "<p><br></p>";
+  el.root.scrollTop = top;
+  updateCount();
+  ctx.toast("Picked up the latest from the file");
+  return true;
 }
 
 export async function closePage() {
@@ -449,7 +476,7 @@ function wireToolbar() {
     const b = e.target.closest("button");
     if (!b) return;
     if (b.dataset.fmt) cmd(b.dataset.fmt);
-    else if (b.dataset.cmd === "close") closePage();
+    else if (b.dataset.cmd === "close") (ctx.onBack ? ctx.onBack() : closePage());
     else if (b.dataset.cmd === "ask") askFromKeys();
     else if (b.dataset.cmd === "menu") { el.menu.hidden = !el.menu.hidden; }
     else if (b.dataset.c) resolveConflict(b.dataset.c);
@@ -664,7 +691,7 @@ export async function askWholePage(instruction) {
     ctx.toast("Claude couldn't edit the page: " + err.message, true);
     return false;
   } finally {
-    el.body.contentEditable = "true";
+    el.body.contentEditable = P.locked ? "false" : "true";
     working(false);
   }
 }

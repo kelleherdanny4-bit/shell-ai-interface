@@ -698,7 +698,12 @@ async function createPage(body) {
   }
   if (body.file) {
     const file = path.resolve(String(body.file));
-    if (!PAGE_EXT.test(file) || !insideRoots(file, pageRoots(project))) throw Object.assign(new Error("Shell can only open .md and .txt files in this project's folders."), { code: 403 });
+    // A skeye chat may also open files in the folder of the chat it came from.
+    const roots = pageRoots(project);
+    const from = body.fromThread && (await readThread(body.fromThread));
+    const skDir = from && skeyeEditDir(from);
+    if (skDir) roots.push(skDir);
+    if (!PAGE_EXT.test(file) || !insideRoots(file, roots)) throw Object.assign(new Error("Shell can only open .md and .txt files in this project's folders."), { code: 403 });
     // One page per file: opening it again picks up where you were.
     for (const p of await listPages()) if (p.file === file) {
       const old = await readPage(p.id);

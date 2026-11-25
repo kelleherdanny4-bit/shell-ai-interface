@@ -5,7 +5,7 @@
 // project is a cloud. One world, one camera.
 import { marked } from "/vendor/marked.js";
 import DOMPurify from "/vendor/purify.js";
-import { initPage, openPage, newPage, closePage, pageIsOpen, currentPage, askWholePage, openPicker, dismissPageMenus } from "/page.js";
+import { initPage, openPage, openFile, newPage, closePage, pageIsOpen, currentPage, askWholePage, openPicker, dismissPageMenus, setEditable, refreshFromDisk } from "/page.js";
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -643,7 +643,7 @@ async function ensureThread(thread) {
 
 async function send() {
   if (!canSend()) return;
-  if (pageIsOpen()) return sendToPage();
+  if (pageIsOpen() && docFull()) return sendToPage();
   const text = input.value.trim();
   const notes = state.notes.map(({ quote, note, docTitle }) => ({ quote, note, docTitle }));
   const sentNotes = state.notes;
@@ -774,20 +774,199 @@ async function startPage() {
 const CHAT_PLACEHOLDER = () => (innerWidth <= 760 ? "Say something" : "Say something to the sky");
 const CHAT_META = $("#composer-meta").innerHTML;
 
-function pageOpened(pg) {
-  document.body.classList.remove("readonly");
-  input.placeholder = innerWidth <= 760 ? "Tell Claude a change" : "Tell Claude what to change on this page";
-  $("#composer-meta").innerHTML = "Enter: Claude edits the whole page as tracked changes · select words to edit just those (⌘J)";
+// The composer talks to whatever you're in: the page when you're in it, its chat when you've stepped back.
+function composerFor(page) {
+  if (page) {
+    document.body.classList.remove("readonly");
+    input.placeholder = innerWidth <= 760 ? "Tell Claude a change" : "Tell Claude what to change on this page";
+    $("#composer-meta").innerHTML = "Enter: Claude edits the whole page as tracked changes · select words to edit just those (⌘J) · pinch out to talk it over";
+  } else {
+    input.placeholder = pageIsOpen() ? (innerWidth <= 760 ? "Talk it over" : "Talk it over. Pinch in to write") : CHAT_PLACEHOLDER();
+    $("#composer-meta").innerHTML = CHAT_META;
+    if (state.thread) document.body.classList.toggle("readonly", !!state.thread.readOnly);
+  }
   measureComposer();
   updateCrumb();
 }
 
+function pageOpened() {
+  // Every page opens with you in it, typing.
+  cancelAnimationFrame(DOC.raf);
+  Object.assign(DOC, { k: 1, v: 0, target: 1, raf: null, g: null, anchor: null });
+  renderDoc();
+  composerFor(true);
+}
+
 function pageClosed() {
-  input.placeholder = CHAT_PLACEHOLDER();
-  $("#composer-meta").innerHTML = CHAT_META;
-  if (state.thread) document.body.classList.toggle("readonly", !!state.thread.readOnly);
-  measureComposer();
-  updateCrumb();
+  cancelAnimationFrame(DOC.raf);
+  Object.assign(DOC, { k: 1, v: 0, target: 1, raf: null, g: null, anchor: null });
+  pageEl.style.transform = pageEl.style.transformOrigin = pageEl.style.clipPath = "";
+  sheetEl.style.rotate = "";
+  feed.style.opacity = feed.style.transform = "";
+  document.body.classList.remove("doc-far", "doc-narrow");
+  document.body.classList.add("doc-full");
+  composerFor(false);
+}
+
+// ---------------------------------------------------------------- the page and its chat, a pinch apart
+// In a page, pinch out (zoom out) and the page floats up into the corner as a
+// little sheet of paper; the chat about it opens around it, and you talk it
+// over. Pinch in and you sink back into the page to write. One number, DOC.k:
+// 1 = in the page, 0 = out in its chat. It rides a spring, so it bounces.
+
+const pageEl = $("#page"), sheetEl = $("#sheet");
+const DOC = { k: 1, v: 0, target: 1, raf: null, g: null, anchor: null, settleT: null };
+const docFull = () => DOC.target === 1;
+
+// Where the little sheet floats when you step back: top right, beside the chat.
+function docAnchor() {
+  const { vw, topH } = state.layout;
+  const sheetW = sheetEl.offsetWidth || 860;
+  const side = (vw - Math.min(760, vw - 32)) / 2;
+  const narrow = side < 230;
+  const w = narrow ? Math.min(150, vw * 0.38) : Math.min(320, side - 48);
+  const s = Math.max(0.1, Math.min(0.42, w / sheetW));
+  const m = narrow ? 16 : 30;
+  const sx1 = sheetEl.offsetLeft + sheetW;
+  const sy0 = sheetEl.offsetTop - pageEl.scrollTop;
+  const top = topH + (narrow ? 12 : 30);
+  let seen = Math.max(0, Math.min(sheetEl.offsetHeight + Math.min(0, sy0), pageEl.clientHeight - Math.max(0, sy0) - (state.layout.composerH || 150)));
+  // On a phone the sheet is a short strip above the chat, so the two never overlap.
+  let clip = 0;
+  if (narrow && seen * s > 120) { clip = pageEl.clientHeight - (Math.max(0, sy0) + 120 / s); seen = 120 / s; }
+  return { s, narrow, clip, ox: (vw - m - sx1 * s) / (1 - s), oy: (top - sy0 * s) / (1 - s), h: Math.round(seen * s), top };
+}
+
+// Past either end it stretches like a rubber band, then springs back.
+const band = (x) => (x > 1 ? 1 + 0.14 * (1 - Math.exp(-(x - 1) * 3)) : x < 0 ? -0.16 * (1 - Math.exp(x * 3)) : x);
+
+function renderDoc() {
+  if (!pageIsOpen()) return;
+  const k = DOC.k, f = Math.max(0, Math.min(1, k));
+  const a = (DOC.anchor ||= docAnchor());
+  if (k > 0.999 && k < 1.001) {
+    pageEl.style.transform = "";
+    sheetEl.style.rotate = "";
+  } else {
+    pageEl.style.transformOrigin = `${a.ox.toFixed(1)}px ${a.oy.toFixed(1)}px`;
+    pageEl.style.transform = `scale(${Math.max(0.04, a.s + (1 - a.s) * k).toFixed(4)})`;
+    sheetEl.style.rotate = `${((1 - f) * 2.4).toFixed(2)}deg`; // a little tilt, like paper set down on the sky
+  }
+  pageEl.style.clipPath = a.clip && f < 0.999 ? `inset(0 0 ${(a.clip * (1 - f)).toFixed(0)}px 0)` : "";
+  // The chat comes up from below as the page lifts away.
+  feed.style.opacity = f > 0.995 ? "" : (1 - f).toFixed(3);
+  feed.style.transform = f > 0.995 || f < 0.005 ? "" : `translateY(${(f * 40).toFixed(1)}px) scale(${(1 - f * 0.04).toFixed(4)})`;
+  const full = f > 0.985;
+  document.body.classList.toggle("doc-full", full);
+  document.body.classList.toggle("doc-far", !full);
+  document.body.classList.toggle("doc-narrow", a.narrow);
+  document.documentElement.style.setProperty("--doc-card-bottom", `${a.top + a.h}px`);
+}
+
+// Decide which side you're on as soon as you let go, so the page or the chat is ready under your fingers.
+function docMode(full) {
+  if (DOC.target === (full ? 1 : 0)) return;
+  DOC.target = full ? 1 : 0;
+  setEditable(full);
+  composerFor(full);
+  if (full) refreshFromDisk().catch(() => {});
+  else { hidePopover(); requestAnimationFrame(() => state.msgs.forEach(positionMarginalia)); }
+}
+
+function springDoc(to) {
+  if (!pageIsOpen()) return;
+  if (DOC.k > 0.98 && to === 0) DOC.anchor = docAnchor();
+  docMode(to === 1);
+  cancelAnimationFrame(DOC.raf);
+  if (reduceMotion) { Object.assign(DOC, { k: to, v: 0, raf: null }); return renderDoc(); }
+  let last = performance.now();
+  const step = (now) => {
+    const dt = Math.min(0.032, (now - last) / 1000);
+    last = now;
+    // stiffness 190, damping 15: overshoots about a tenth, wobbles once, settles
+    DOC.v += (-190 * (DOC.k - to) - 15 * DOC.v) * dt;
+    DOC.k += DOC.v * dt;
+    if (Math.abs(DOC.k - to) < 0.0015 && Math.abs(DOC.v) < 0.02) { Object.assign(DOC, { k: to, v: 0, raf: null }); return renderDoc(); }
+    renderDoc();
+    DOC.raf = requestAnimationFrame(step);
+  };
+  DOC.raf = requestAnimationFrame(step);
+}
+
+// Follow the fingers while they pinch; spring to a side when they stop.
+function scrubDoc(d) {
+  if (!pageIsOpen() || state.view !== "chat") return;
+  cancelAnimationFrame(DOC.raf);
+  DOC.raf = null;
+  if (!DOC.g) {
+    if (DOC.k > 0.98) DOC.anchor = docAnchor();
+    DOC.g = { from: DOC.target, raw: DOC.k, t: performance.now() };
+  }
+  const now = performance.now(), dt = Math.max(8, now - DOC.g.t) / 1000;
+  DOC.g.raw += d;
+  DOC.g.t = now;
+  const k = band(DOC.g.raw);
+  DOC.v = (k - DOC.k) / dt;
+  DOC.k = k;
+  renderDoc();
+  clearTimeout(DOC.settleT);
+  DOC.settleT = setTimeout(settleDoc, 140);
+}
+
+function settleDoc() {
+  const g = DOC.g;
+  if (!g) return;
+  DOC.g = null;
+  clearTimeout(DOC.settleT);
+  DOC.v = Math.max(-6, Math.min(6, DOC.v));
+  // Out in the chat and still pinching out: rise to this project's chats.
+  if (g.from === 0 && g.raw < -0.45) return showChats();
+  // A small pinch is enough to change sides.
+  const to = g.from === 1 ? (g.raw < 0.78 ? 0 : 1) : g.raw > 0.22 ? 1 : 0;
+  springDoc(to);
+}
+
+function pinchControls() {
+  // Trackpad pinch arrives as ctrl+wheel (Chrome, Firefox, Edge). While a page is open, it's ours.
+  addEventListener("wheel", (e) => {
+    if (!e.ctrlKey || !pageIsOpen() || state.view !== "chat") return;
+    e.preventDefault();
+    scrubDoc(-e.deltaY * 0.0085);
+  }, { passive: false });
+  // Safari on a Mac sends gesture events instead.
+  let gs = null, touching = false;
+  addEventListener("gesturestart", (e) => { if (!pageIsOpen() || state.view !== "chat") return; e.preventDefault(); gs = 1; }, { passive: false });
+  addEventListener("gesturechange", (e) => {
+    if (gs === null) return;
+    e.preventDefault();
+    if (!touching) scrubDoc(Math.log(e.scale / gs) * 1.7);
+    gs = e.scale;
+  }, { passive: false });
+  addEventListener("gestureend", (e) => { if (gs === null) return; e.preventDefault(); gs = null; if (!touching) settleDoc(); }, { passive: false });
+  // Two fingers on a phone or tablet.
+  let td = null;
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 2 || !pageIsOpen() || state.view !== "chat") return;
+    touching = true;
+    td = dist(e.touches);
+  }, { passive: true });
+  addEventListener("touchmove", (e) => {
+    if (td === null || e.touches.length !== 2) return;
+    e.preventDefault();
+    const d = dist(e.touches);
+    scrubDoc(Math.log(d / td) * 1.7);
+    td = d;
+  }, { passive: false });
+  addEventListener("touchend", (e) => {
+    if (td === null || e.touches.length >= 2) return;
+    td = null;
+    touching = false;
+    settleDoc();
+  });
+  // Out in the chat, the little sheet is a door back in.
+  pageEl.addEventListener("pointerdown", (e) => { if (!docFull()) { e.preventDefault(); e.stopPropagation(); } }, true);
+  pageEl.addEventListener("click", (e) => { if (!docFull()) { e.preventDefault(); e.stopPropagation(); springDoc(1); } }, true);
 }
 
 // ---------------------------------------------------------------- header, drawer, toast
@@ -795,7 +974,7 @@ function pageClosed() {
 function updateCrumb() {
   const crumb = $("#crumb-project"), title = $("#thread-title");
   if (state.view === "sky") { crumb.textContent = "All projects"; title.textContent = ""; return; }
-  const pg = state.view === "chat" && currentPage();
+  const pg = state.view === "chat" && docFull() && currentPage();
   crumb.textContent = projectName(pg ? pg.projectId : state.projectId);
   title.textContent = pg ? `▤ ${pg.title || "Untitled page"}` : state.view === "chat" ? state.thread?.title || "New chat" : "";
 }
@@ -1847,8 +2026,12 @@ addEventListener("keydown", (e) => {
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "Escape" && $("#drawer").classList.contains("open")) return closeDrawer();
-  if (pageIsOpen() && e.key === "Escape") return closePage();
-  if (pageIsOpen() && e.key === "o") return closePage().then(zoomOut);
+  if (pageIsOpen() && docFull()) {
+    if (e.key === "Escape" || e.key === "o") return springDoc(0); // step back to talk it over
+  } else if (pageIsOpen() && state.view === "chat") {
+    if (e.key === "i" || e.key === "Enter") return springDoc(1); // back into the page
+    if (e.key === "o") return closePage().then(zoomOut);
+  }
   if (state.view !== "chat") {
     if (e.key === "o") zoomOut();
     else if (["Escape", "Enter", "i"].includes(e.key)) diveBack();
@@ -1878,6 +2061,8 @@ addEventListener("resize", () => {
     else { const cl = chatCloud(); if (cl) Object.assign(state.cam, { x: cl.x, y: cl.y, s: 1.1, r: 0 }); }
     applyCam();
     state.msgs.forEach(positionMarginalia);
+    DOC.anchor = null;
+    renderDoc();
   }, 80);
 });
 
@@ -1930,7 +2115,7 @@ async function checkSync() {
 }
 
 async function boot() {
-  initPage({ api, toast, esc, marked, DOMPurify, input, projectName, projectId: () => shellProject(), onOpen: pageOpened, onClose: pageClosed });
+  initPage({ api, toast, esc, marked, DOMPurify, input, projectName, projectId: () => shellProject(), onOpen: pageOpened, onClose: pageClosed, onBack: () => springDoc(0) });
   $("#btn-page").addEventListener("click", startPage);
   if (innerWidth <= 760) input.placeholder = "Say something";
   if (window.visualViewport) {
@@ -1950,6 +2135,7 @@ async function boot() {
   quietChrome();
   ground();
   overviewControls();
+  pinchControls();
   voice();
   tickClock();
   setInterval(tickClock, 15000);
@@ -1966,24 +2152,28 @@ async function boot() {
   const list = await api("/api/threads").catch(() => []);
   let last = null;
   try { last = localStorage.getItem("shell.lastThread"); } catch {}
-  // "Take it to the skeye": /?skeye=<Claude app session id>
-  const skeye = new URLSearchParams(location.search).get("skeye");
+  const qs = new URLSearchParams(location.search);
+  if (location.search) history.replaceState(null, "", location.pathname);
+  // "Take it to the skeye": /?skeye=<Claude app session id>[&doc=<file>] (doc: start in that document)
+  const skeye = qs.get("skeye"), doc = qs.get("doc");
   // /?thread=<id> opens that chat (the original chat links back to its skeye chat this way).
-  const want = new URLSearchParams(location.search).get("thread");
-  if (want) { history.replaceState(null, "", location.pathname); last = want; }
+  const want = qs.get("thread");
+  if (want) last = want;
   let pick = list.find((t) => t.id === last) || list[0];
   if (skeye) {
-    history.replaceState(null, "", location.pathname);
     try { const t = await api(`/api/skeye/${encodeURIComponent(skeye)}`, { method: "POST" }); await loadProjects().catch(() => {}); pick = t; } catch {}
   }
   state.projectId = pick?.projectId || state.projects[0]?.id;
   if (pick) await openThread(pick.id);
   else draftThread(state.projectId);
-  // /?page=<id>, or the page you had open when you left
-  let pageId = new URLSearchParams(location.search).get("page");
-  if (pageId) history.replaceState(null, "", location.pathname);
-  else try { pageId = localStorage.getItem("shell.lastPage"); } catch {}
-  if (pageId) openPage(pageId).catch(() => { try { localStorage.removeItem("shell.lastPage"); } catch {} });
+  // the skeye's document, /?page=<id>, or the page you had open when you left
+  let pageId = qs.get("page");
+  if (doc) {
+    await openFile(doc, state.projectId, pick?.id).catch((e) => toast("Couldn't open " + doc.split("/").pop() + ": " + e.message, true));
+  } else {
+    if (!pageId) try { pageId = localStorage.getItem("shell.lastPage"); } catch {}
+    if (pageId) openPage(pageId).catch(() => { try { localStorage.removeItem("shell.lastPage"); } catch {} });
+  }
   buildMap();
   // Open just above this chat's cloud, then sink into it.
   const cl = chatCloud();

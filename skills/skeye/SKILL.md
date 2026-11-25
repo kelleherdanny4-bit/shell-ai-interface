@@ -8,15 +8,27 @@ description: Take this chat to the skeye — open the current Claude Code conver
 The skeye is Shell's sky editor (http://localhost:4747). It copies this chat
 in and continues it from there. What happens there comes back here on its own.
 
-1. Run the link script with this session's ID (it finds the chat by itself if
-   the ID is blank):
+1. Decide whether this is about a document. It almost always is: a piece of
+   copy, an essay, a draft, a .md or .txt file you've been writing or editing
+   together. If so, pass that file as the second argument, and the link opens
+   straight into it, ready to edit like Word. Pinching out from the page shows
+   this chat about it; pinching in goes back to editing.
+
+   ```bash
+   ~/.claude/skills/skeye/skeye.sh "${CLAUDE_SESSION_ID}" "<path to the document>"
+   ```
+
+   If the copy only lives in this chat (not in a file yet), write it to a .md
+   file in this chat's folder first, then pass that file. Only leave the
+   second argument off when there truly is no document; then it opens the
+   chat (it finds the chat by itself if the ID is blank):
 
    ```bash
    ~/.claude/skills/skeye/skeye.sh "${CLAUDE_SESSION_ID}"
    ```
 
 2. Reply with one short line and the link it printed, as a markdown link
-   named "the skeye". Nothing else. Example:
+   named "the skeye" (or the document's name, when there is one). Nothing else. Example:
    `Up we go: [the skeye](http://localhost:4747/?skeye=…)`
 
 3. If the script says Shell isn't running, give him this to start it, then
