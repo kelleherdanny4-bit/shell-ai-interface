@@ -436,7 +436,7 @@ body:not(.night):not(.view-chat) #sync-nudge { color: var(--ink); text-shadow: 0
 /* ---------- pages: a sheet of paper you edit like Word ---------- */
 #page {
   position: fixed; inset: var(--visible-top, 0px) var(--visible-right, 0px) var(--visible-bottom, 0px) var(--visible-left, 0px); z-index: 4; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
-  padding: calc(var(--top-h) + var(--page-bar-h, 42px) + 24px) 16px calc(var(--composer-h) + 70px);
+  padding: calc(var(--top-h) + var(--page-bar-h, 42px) + 24px) 16px calc(var(--page-composer-h, var(--composer-h)) + 70px);
   scrollbar-width: thin; scrollbar-color: rgb(255 253 247 / .35) transparent;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 calc(var(--top-h) + var(--page-bar-h, 42px) + 12px), #000 calc(100% - var(--composer-h) - 40px), transparent calc(100% - var(--composer-h) + 16px));
   mask-image: linear-gradient(to bottom, transparent 0, #000 calc(var(--top-h) + var(--page-bar-h, 42px) + 12px), #000 calc(100% - var(--composer-h) - 40px), transparent calc(100% - var(--composer-h) + 16px));
@@ -465,7 +465,7 @@ body.paging.doc-far.doc-narrow #chat {
 body.paging.doc-far.doc-narrow #sheet::after { display: none; }
 #sheet {
   position: relative; max-width: 860px; margin: 0 auto; cursor: text;
-  min-height: calc(100vh - var(--top-h) - var(--composer-h) - 150px);
+  min-height: calc(100vh - var(--top-h) - var(--page-composer-h, var(--composer-h)) - 150px);
   padding: 46px 92px 90px; border-radius: 3px;
   background: var(--white) var(--washi);
   box-shadow: 0 0 0 .5px rgb(var(--sky-shade) / .2), calc(var(--sx) * 14px) calc(var(--sy) * 20px) 40px -12px rgb(var(--sky-shade) / .45);
@@ -592,7 +592,7 @@ body.paging:not(.view-chat) #page-bar { display: none; }
 body.readonly .reply-edit { display: none; }
 
 @media (max-width: 760px) {
-  #page { padding: calc(var(--top-h) + var(--page-bar-h, 42px) + 16px) 8px calc(var(--composer-h) + 60px); }
+  #page { padding: calc(var(--top-h) + var(--page-bar-h, 42px) + 16px) 8px calc(var(--page-composer-h, var(--composer-h)) + 60px); }
   #sheet { padding: 26px 22px 60px; }
   .doc-body > .sug-block { margin: 0 -10px 16px; padding: 10px 10px 8px 9px; }
   .reply-edit { opacity: .8; }

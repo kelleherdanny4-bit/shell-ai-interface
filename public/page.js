@@ -411,7 +411,7 @@ function keepCaretInView() {
   if (!s.rangeCount) return;
   let r = s.getRangeAt(0).getBoundingClientRect();
   if (!r.height) { const n = s.anchorNode?.nodeType === 1 ? s.anchorNode : s.anchorNode?.parentElement; r = n?.getBoundingClientRect() || r; }
-  const limit = el.root.getBoundingClientRect().bottom - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--composer-h")) || 150) - 70;
+  const limit = el.root.getBoundingClientRect().bottom - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--page-composer-h")) || 150) - 70;
   if (r.bottom > limit) el.root.scrollBy({ top: r.bottom - limit + 40 });
 }
 

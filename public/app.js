@@ -51,6 +51,13 @@ function measureComposer() {
   const h = Math.round($("#composer").getBoundingClientRect().height) + 24;
   state.layout.composerH = h;
   document.documentElement.style.setProperty("--composer-h", h + "px");
+  // The page keeps the room it had for an empty typing line. A message that grows
+  // to two or three lines lays over the foot of the page instead of shoving the
+  // whole sheet (and its fade) up and down with every line.
+  if (!input.value.trim() || !state.layout.pageComposerH) {
+    state.layout.pageComposerH = h;
+    document.documentElement.style.setProperty("--page-composer-h", h + "px");
+  }
 }
 
 // Fixed controls use layout-viewport coordinates, including while pinch-panned.
@@ -1600,7 +1607,8 @@ function ground() {
     buildAmbient();
     last = "";
   };
-  let scene, light, sceneT = -Infinity, last = "", lastDraw = 0, hour = 12;
+  let scene, light, sceneT = -Infinity, last = "", lastDraw = 0, hour = 12, lastKey = -Infinity;
+  addEventListener("keydown", () => (lastKey = performance.now()), { capture: true, passive: true });
   resize();
   addEventListener("resize", resize);
   cv.addEventListener("webglcontextlost", (e) => e.preventDefault());
@@ -1628,7 +1636,11 @@ function ground() {
       if (Math.abs(cl.hov - want) > 0.004) { cl.hov += (want - cl.hov) * (reduceMotion ? 1 : 0.12); hovering = true; }
     }
     const key = [c.x, c.y, c.s, c.r, L.cx, L.cy, k].map((v) => (v || 0).toFixed(3)).join();
-    const alive = dens > 0.002 && !reduceMotion && now - lastDraw > 50;
+    // The sky only drifts a pixel or two a second, so it needn't repaint every frame:
+    // a few times a second up in the sky, once a second behind a page, and not at all
+    // while you're typing (a full-screen repaint per frame was what made typing lag).
+    const calm = document.body.classList.contains("doc-full") ? 1000 : 200;
+    const alive = dens > 0.002 && !reduceMotion && now - lastDraw > calm && now - lastKey > 1500;
     if (key === last && !alive && !hovering) return;
     last = key; lastDraw = now;
 
